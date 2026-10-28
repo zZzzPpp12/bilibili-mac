@@ -1,0 +1,36 @@
+name: macOS build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Unit and synthetic playback tests
+        run: bash Scripts/test.sh
+      - name: Build development application
+        run: bash Scripts/build-app.sh
+      - name: Package application
+        run: ditto -c -k --sequesterRsrc --keepParent .build/BiliMac.app .build/BiliMac-macOS.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BiliMac-macOS-development
+          path: .build/BiliMac-macOS.zip
+          retention-days: 14
