@@ -2,7 +2,7 @@
 
 为 macOS 打造的原生哔哩哔哩客户端，使用 SwiftUI、AVPlayer 和本机 DASH/HLS 桥接。
 
-当前为 **0.1.0 开发预览**。从完整 PRD 开始，先实现可浏览、可搜索、可观看的桌面闭环。与哔哩哔哩官方无关联。
+当前为 **0.1.1 开发预览**。修复 0.1.0 打包应用因设置域初始化失败而启动崩溃的问题。从完整 PRD 开始，先实现可浏览、可搜索、可观看的桌面闭环。与哔哩哔哩官方无关联。
 
 ## 文档
 
@@ -32,6 +32,8 @@ bash Scripts/test.sh
 bash Scripts/build-app.sh
 open .build/BiliMac.app
 ```
+
+构建脚本会执行打包后的 `BiliMac.app/Contents/MacOS/BiliMac --check-startup`，验证真实 Bundle ID 下的应用/设置初始化，不读取账号、不联网，也不创建窗口。真实窗口启动仍单独验收。
 
 也可以在 Xcode 中打开 `Package.swift`，运行 BiliMac target。
 

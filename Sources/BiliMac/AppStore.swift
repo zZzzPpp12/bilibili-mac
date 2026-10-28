@@ -2,7 +2,15 @@ import SwiftUI
 import BiliMacCore
 
 enum AppSettings {
-    static let defaults = UserDefaults(suiteName: "dev.zzpp.BiliMac")!
+    static let domain = "dev.zzpp.BiliMac"
+    static let defaults = makeDefaults(bundleIdentifier: Bundle.main.bundleIdentifier)
+    // The application's own domain already belongs to .standard. Creating it
+    // again as a suite can return nil in a packaged app, unlike an XCTest host.
+    static func makeDefaults(bundleIdentifier: String?, standard: UserDefaults = .standard,
+                             suiteFactory: (String) -> UserDefaults? = { UserDefaults(suiteName: $0) }) -> UserDefaults {
+        guard bundleIdentifier != domain else { return standard }
+        return suiteFactory(domain) ?? standard
+    }
     static func register() { defaults.register(defaults: ["appearance":"system", "autoPlay":true, "rememberPosition":true, "danmakuEnabled":true, "danmakuOpacity":0.8, "playbackRate":1.0]) }
 }
 enum Destination: String, CaseIterable, Identifiable {

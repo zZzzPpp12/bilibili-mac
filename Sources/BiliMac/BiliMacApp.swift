@@ -2,6 +2,19 @@ import SwiftUI
 
 @main struct BiliMacApp: App {
     @State private var store = AppStore()
+    init() {
+        // Exercise the real .app bundle and AppStore initialization in CI without
+        // creating a window, accessing credentials or contacting the network.
+        if ProcessInfo.processInfo.arguments.contains("--check-startup") {
+            guard Bundle.main.bundleIdentifier == AppSettings.domain,
+                  AppSettings.defaults.object(forKey: "appearance") != nil else {
+                fputs("Packaged application startup check failed\n", stderr)
+                exit(EXIT_FAILURE)
+            }
+            print("Packaged application startup OK (\(AppSettings.domain))")
+            exit(EXIT_SUCCESS)
+        }
+    }
     var body: some Scene {
         Window("BiliMac", id: "main") {
             RootView(store: store)
