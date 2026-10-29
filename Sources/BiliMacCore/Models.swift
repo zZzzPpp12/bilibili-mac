@@ -1,5 +1,5 @@
 import Foundation
-import BiliModels
+import BiliMacMedia
 
 public enum ClientError: LocalizedError {
     case invalidResponse, http(Int), server(Int, String), noPlayableMedia, invalidInput
@@ -73,8 +73,8 @@ public struct Account: Sendable {
     public let name: String
 }
 public struct PlaybackManifest: Sendable {
-    public let videos: [MediaRepresentation]
-    public let audio: MediaRepresentation
+    public let videos: [MediaTrack]
+    public let audio: MediaTrack
     public let qualityNames: [Int: String]
     public var qualities: [Int] { Array(Set(videos.map(\.id))).sorted(by: >) }
 }

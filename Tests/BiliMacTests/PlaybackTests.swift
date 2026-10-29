@@ -1,9 +1,7 @@
 import Foundation
 import AVFoundation
 import Testing
-import BiliModels
-import BiliNetworking
-import BiliPlayback
+import BiliMacMedia
 import BiliMacCore
 @testable import BiliMac
 
@@ -12,72 +10,72 @@ import BiliMacCore
         let controller = PlayerController()
         controller.player.replaceCurrentItem(with:AVPlayerItem(url:URL(fileURLWithPath:"/tmp/nonexistent-fixture.mp4")))
         controller.stop()
-        #expect(controller.player.currentItem == nil)
-        #expect(!controller.isOpen)
-        #expect(controller.danmaku.isEmpty)
+        #expect(controller.player.currentItem == nil); #expect(!controller.isOpen); #expect(controller.danmaku.isEmpty)
     }
-    @Test func bridgeBuildsCompletePlaylistAndServesExactRange() async throws {
-        let (video,audio,source) = try fixtures()
-        let asset = try await DASHToHLSBridge(mediaStreamer:source).prepare(video:video,audio:audio,headers:[:])
+    @Test func virtualFragmentReturnsExactBytesAndRelativeRangeWithoutLeakingSource() async throws {
+        let f = try MediaFixtures()
+        let asset = try await NativePlaybackBridge(reader:f.reader).prepare(video:f.video,audio:f.audio)
         defer { asset.stop() }
-        let config = URLSessionConfiguration.ephemeral; config.connectionProxyDictionary = [:]
-        let session = URLSession(configuration:config)
-        let (master, response) = try await session.data(from:asset.url)
+        let client = MediaFixtures.session()
+        let (master,response) = try await client.data(from:asset.url)
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
-        let text = String(decoding:master,as:UTF8.self)
-        #expect(text.contains("#EXT-X-STREAM-INF"))
-        let playlist = try #require(text.split(separator:"\n").first { !$0.hasPrefix("#") && $0.contains("video/") })
-        let playlistURL = try #require(URL(string:String(playlist),relativeTo:asset.url))
-        let (data,_) = try await session.data(from:playlistURL)
-        let content = String(decoding:data,as:UTF8.self)
-        #expect(content.contains("#EXT-X-ENDLIST"))
-        #expect(content.components(separatedBy:"#EXTINF:").count-1 == 4)
-        #expect(content.contains("#EXT-X-BYTERANGE"))
+        let main = String(decoding:master,as:UTF8.self)
+        #expect(main.contains("#EXT-X-MEDIA:TYPE=AUDIO")); #expect(!main.contains("bilivideo.com"))
+        let directory = URL(string:"v/index.m3u8",relativeTo:asset.url)!
+        let (playlist,_) = try await client.data(from:directory)
+        let text = String(decoding:playlist,as:UTF8.self)
+        #expect(text.contains("#EXT-X-ENDLIST")); #expect(text.components(separatedBy:"#EXTINF:").count-1 == 8)
+        #expect(text.contains("#EXT-X-MAP:URI=\"init.mp4\"")); #expect(!text.contains("I-FRAMES-ONLY"))
+        let media = URL(string:"seg/0.m4s",relativeTo:directory)!
+        let index = try SegmentIndex.decode(f.videoBytes.subdata(in:Int(f.video.index.offset)..<Int(f.video.index.offset+f.video.index.length)),fileOffset:f.video.index.offset,fileLength:Int64(f.videoBytes.count))
+        let fragment = index.fragments[0].bytes
+        let (body,_) = try await client.data(from:media)
+        #expect(body == f.videoBytes.subdata(in:Int(fragment.offset)..<Int(fragment.offset+fragment.length)))
+        var request = URLRequest(url:media); request.setValue("bytes=3-9",forHTTPHeaderField:"Range")
+        let (partial,partialResponse) = try await client.data(for:request)
+        #expect(partial == body.subdata(in:3..<10))
+        #expect((partialResponse as? HTTPURLResponse)?.value(forHTTPHeaderField:"Content-Range") == "bytes 3-9/\(body.count)")
+        #expect((partialResponse as? HTTPURLResponse)?.statusCode == 206)
+        request.setValue("bytes=9999999-",forHTTPHeaderField:"Range")
+        let (_,invalid) = try await client.data(for:request); #expect((invalid as? HTTPURLResponse)?.statusCode == 416)
+        request.httpMethod = "HEAD"; request.setValue(nil,forHTTPHeaderField:"Range")
+        let before = await f.reader.reads.count
+        let (empty,head) = try await client.data(for:request)
+        #expect(empty.isEmpty); #expect((head as? HTTPURLResponse)?.value(forHTTPHeaderField:"Content-Length") == String(body.count))
+        #expect(await f.reader.reads.count == before)
     }
-    @Test @MainActor func avPlayerActuallyAdvancesThroughSyntheticHLS() async throws {
-        let (video,audio,source) = try fixtures()
-        let asset = try await DASHToHLSBridge(mediaStreamer:source).prepare(video:video,audio:audio,headers:[:])
+    @Test @MainActor func avPlayerDecodesOwnAudioVideoAndCanSeekWhilePaused() async throws {
+        let f = try MediaFixtures()
+        let asset = try await NativePlaybackBridge(reader:f.reader).prepare(video:f.video,audio:f.audio)
         defer { asset.stop() }
-        let player = AVPlayer(url:asset.url)
+        let player = AVPlayer(url:asset.url); player.isMuted = true
         defer { player.pause(); player.replaceCurrentItem(with:nil) }
         player.play()
-        for _ in 0..<80 {
-            if player.currentTime().seconds > 0.4 { break }
-            if player.currentItem?.status == .failed { break }
+        for _ in 0..<120 {
+            if player.currentTime().seconds > 0.4 || player.currentItem?.status == .failed { break }
             try await Task.sleep(for:.milliseconds(100))
         }
         #expect(player.currentItem?.status == .readyToPlay)
         #expect(player.currentTime().seconds > 0.4)
-        #expect((player.currentItem?.presentationSize.width ?? 0) > 0)
-    }
-    private func fixtures() throws -> (MediaRepresentation,MediaRepresentation,FixtureStream) {
-        func track(_ name:String,id:Int,kind:MediaKind,codec:String) throws -> (MediaRepresentation,Data) {
-            let url = try #require(Bundle.module.url(forResource:name,withExtension:"base64",subdirectory:"Fixtures"))
-            let data = try #require(Data(base64Encoded:Data(contentsOf:url),options:.ignoreUnknownCharacters))
-            var offset = 0; var sidx: (Int,Int)?
-            while offset+8 <= data.count {
-                let size = data[offset..<offset+4].reduce(0) { $0*256+Int($1) }
-                guard size >= 8, offset+size <= data.count else { break }
-                if String(decoding:data[offset+4..<offset+8],as:UTF8.self) == "sidx" { sidx = (offset,size); break }
-                offset += size
-            }
-            let index = try #require(sidx)
-            let attributes = kind == .video ? try VideoRepresentationAttributes(width:128,height:72,frameRate:24) : nil
-            let representation = MediaRepresentation(id:id,kind:kind,codecs:codec,mimeType:kind == .video ? "video/mp4":"audio/mp4",bandwidth:kind == .video ? 100000:32000,videoAttributes:attributes,primaryURL:URL(string:"https://fixture.bilivideo.com/\(id).mp4")!,backupURLs:[],segmentBase:SegmentBase(initialization:try MediaByteRange(start:0,endInclusive:Int64(index.0-1)),index:try MediaByteRange(start:Int64(index.0),endInclusive:Int64(index.0+index.1-1))))
-            return (representation,data)
+        #expect((player.currentItem?.presentationSize.width ?? 0) == 160)
+        let item = try #require(player.currentItem)
+        let audible = try #require(try await item.asset.loadMediaSelectionGroup(for:.audible))
+        #expect(!audible.options.isEmpty)
+        #expect(item.currentMediaSelection.selectedMediaOption(in:audible) != nil)
+        let reads = await f.reader.reads
+        #expect(reads.contains { $0.0 == f.audio.primaryURL && $0.1.offset > f.audio.index.end })
+        player.pause()
+        await withCheckedContinuation { continuation in
+            player.seek(to:CMTime(seconds:3.2,preferredTimescale:600),toleranceBefore:.zero,toleranceAfter:.zero) { _ in continuation.resume() }
         }
-        let (v,vd) = try track("video-avc-128x72-4s-global-sidx.mp4",id:80,kind:.video,codec:"avc1.4d400b")
-        let (a,ad) = try track("audio-aac-4s-global-sidx.mp4",id:30280,kind:.audio,codec:"mp4a.40.2")
-        return (v,a,FixtureStream(data:[v.primaryURL:vd,a.primaryURL:ad]))
+        #expect(abs(player.currentTime().seconds-3.2) < 0.15); #expect(player.rate == 0)
     }
-}
-private struct FixtureStream: HTTPRangeStreaming {
-    let data: [URL:Data]
-    func stream(from url:URL,rangeHeader:String,expectedRange:HTTPByteRange,expectedCompleteLength:Int64?,headers:[String:String],allowedContentTypes:Set<String>?,requiresContentLength:Bool,onResponse:@escaping @Sendable (HTTPRangeStreamResponse) async throws -> Void,onChunk:@escaping @Sendable (Data) async throws -> Void) async throws -> HTTPRangeStreamResult {
-        let bytes = try #require(data[url]); let lower = Int(expectedRange.start), upper = Int(expectedRange.endInclusive)+1
-        guard lower >= 0, upper <= bytes.count else { throw ClientError.invalidResponse }
-        try await onResponse(HTTPRangeStreamResponse(contentRange:HTTPContentRange(start:expectedRange.start,endInclusive:expectedRange.endInclusive,completeLength:Int64(bytes.count)),contentLength:expectedRange.length,contentType:url.path.contains("30280") ? "audio/mp4":"video/mp4"))
-        try await onChunk(bytes.subdata(in:lower..<upper))
-        return HTTPRangeStreamResult(byteCount:expectedRange.length)
+    @Test func closedSessionCannotServeAndStopIsIdempotent() async throws {
+        let f = try MediaFixtures()
+        let asset = try await NativePlaybackBridge(reader:f.reader).prepare(video:f.video,audio:f.audio)
+        let client = MediaFixtures.session()
+        _ = try await client.data(from:asset.url)
+        asset.stop(); asset.stop()
+        await #expect(throws:(any Error).self) { try await client.data(from:asset.url) }
     }
 }

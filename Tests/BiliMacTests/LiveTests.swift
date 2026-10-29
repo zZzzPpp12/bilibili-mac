@@ -1,7 +1,7 @@
 import Testing
 import Foundation
 import AVFoundation
-import BiliPlayback
+import BiliMacMedia
 @testable import BiliMacCore
 
 @Suite struct LiveTests {
@@ -76,10 +76,10 @@ import BiliPlayback
         let video = try #require(feed.first)
         let detail = try await client.detail(video.bvid)
         let manifest = try await client.manifest(bvid:video.bvid,cid:detail.pages[0].id)
-        let representation = try #require(manifest.videos.filter { $0.codecs.hasPrefix("avc1") }.last)
-        let asset = try await DASHToHLSBridge().prepare(video:representation,audio:manifest.audio,headers:BilibiliClient.mediaHeaders)
+        let representation = try #require(manifest.videos.filter { $0.codec.hasPrefix("avc1") }.last)
+        let asset = try await NativePlaybackBridge().prepare(video:representation,audio:manifest.audio,headers:BilibiliClient.mediaHeaders)
         defer { asset.stop() }
-        let player = AVPlayer(url:asset.url)
+        let player = AVPlayer(url:asset.url); player.isMuted = true
         defer { player.pause(); player.replaceCurrentItem(with:nil) }
         player.play()
         for _ in 0..<120 {
@@ -88,6 +88,6 @@ import BiliPlayback
         }
         #expect(player.currentTime().seconds > 0.5)
         #expect((player.currentItem?.presentationSize.width ?? 0) > 0)
-        print("LIVE: public video media clock and decoded picture size verified; no credentials used")
+        print("LIVE: BiliMacMedia independent bridge media clock and decoded picture verified; no legacy bridge or credentials used")
     }
 }

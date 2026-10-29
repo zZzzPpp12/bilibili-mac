@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import BiliModels
+import BiliMacMedia
 import BiliMacCore
 
 @Suite struct CoreTests {
@@ -61,7 +61,8 @@ import BiliMacCore
         func row(id:Int,codec:String,rate:Int) -> [String:Any] {
             ["id":id,"codecs":codec,"base_url":"https://localhost/private","backup_url":["https://media.bilivideo.com/\(id).mp4"], "width":1920,"height":1080,"bandwidth":rate,"segment_base":["initialization":"0-100","index_range":"101-200"]]
         }
-        let result = try BilibiliClient.parseManifest(["dash":["video":[row(id:80,codec:"avc1.4d401f",rate:100000)], "audio":[row(id:30232,codec:"mp4a.40.2",rate:100),row(id:30280,codec:"mp4a.40.2",rate:200)]]])
+        let result = try BilibiliClient.parseManifest(["dash":["video":[row(id:80,codec:"avc1.4d401f",rate:100000), row(id:120,codec:"hvc1.1.6.L120",rate:200000)], "audio":[row(id:30232,codec:"mp4a.40.2",rate:100),row(id:30280,codec:"mp4a.40.2",rate:200)]]])
+        #expect(result.qualities == [80])
         #expect(result.audio.id == 30280)
         #expect(result.videos.first?.primaryURL.host == "media.bilivideo.com")
         #expect(throws:(any Error).self) { try BilibiliClient.parseManifest([:]) }

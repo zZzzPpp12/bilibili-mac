@@ -18,13 +18,13 @@ BiliMac（SwiftUI / AppKit）
      ├─ InteractionStore → VideoActionsModel → VideoInteractionServing
      │                    （会话/稿件状态、确认草稿、部分回执）
      └─ PlayerController（长期存活的 AVPlayer owner）
-            └─ BiliKitCore DASHToHLSBridge
-                   ├─ 读取并解析 SIDX
-                   ├─ 构造音频/视频 HLS byte-range 播放列表
-                   └─ 本机 HTTP 服务 → CDN Range 请求
+            └─ PlaybackPreparing → NativePlaybackBridge（BiliMacMedia）
+                   ├─ 自有 MediaTrack / ByteSpan、SIDX v0/v1
+                   ├─ 内存 HLS 与虚拟分片，不转码
+                   └─ 会话回环服务 → 有界 Range 读取 → 官方 CDN
 ```
 
-`BiliMacCore` 不依赖 SwiftUI。API 返回应用自己的 Video / VideoDetail / WatchRecord，媒体地址映射为 Vendor 的 MediaRepresentation。AppStore 负责导航、列表任务与当前账号；PlayerController 负责播放项、桥接会话、进度和弹幕加载。
+`BiliMacCore` 不依赖 SwiftUI。API 返回应用自己的 Video / VideoDetail / WatchRecord，媒体地址映射为本项目 BiliMacMedia 的 MediaTrack。AppStore 负责导航、列表任务与当前账号；PlayerController 负责播放项、桥接会话、进度和弹幕加载。
 
 ## 生命周期
 
@@ -37,7 +37,7 @@ BiliMac（SwiftUI / AppKit）
 
 ## 媒体范围
 
-0.1 使用桥接层的标准流式 Range 读取、上游候选源验证和错误传播，没有接入参考项目额外的自适应并发、持续预读到片尾、下载或自动码率策略。常见 SDR H.264/AAC 是基本验证目标；HEVC 仅按接口实际表示提供，HDR/杜比不作完整兼容承诺。
+0.6 将默认播放路径切换到自有 BiliMacMedia，仅提供 H.264/AAC 普通点播；API 映射过滤尚未验证的 HEVC 选项，不展示无法由当前桥接处理的画质。首版采用有界分片缓冲而非整片下载：单次最多 16 MiB，媒体交付并发为 2，并在下游发送完成后释放配额。尚未实现跨会话缓存、自动 CDN 续接、过期 URL 刷新与自动码率。
 
 桥接只绑定回环地址并验证随机会话路径/Host。媒体请求仅携带 User-Agent 和 Referer，不携带账号 Cookie。API URL 固定为对应官方主机；凭据请求拒绝跨主机重定向。
 
@@ -57,7 +57,7 @@ BiliMac（SwiftUI / AppKit）
 
 ## 第三方边界
 
-只引入兼容 macOS 26 SDK 的 BiliKitCore 桥接子集。没有包含 AVPlayerEngine、响度处理 tap 和参考应用 UI。来源提交与抽取改动见 THIRD_PARTY.md。
+0.6 的 Package.swift 无外部包依赖，应用和测试只依赖本项目 BiliMacMedia。Vendor/BiliKitCore 作为历史参考保留在仓库并附原许可，但不构建、不链接，也无运行时回退。预览过渡期仍随包附带历史许可。新合成媒体由本项目像素/PCM 生成；FFmpeg 只用于开发编码，不是运行依赖。来源说明见 THIRD_PARTY.md。
 
 ## 后续演进
 
@@ -84,3 +84,13 @@ BiliMac（SwiftUI / AppKit）
 `AppStore.profilePath` 保存主页来源和必要的播放器返回记录。正常浏览主页不替换 AVPlayer，迷你播放器继续可用；主页内打开另一视频后，返回上层作者来源可恢复原视频/CID/位置/暂停意图。用户明确关闭播放项后不会恢复。搜索结果模型不因展示主页而重置。
 
 用户搜索和投稿先向官方 finger/spi 获取浏览标识，再使用 nav 返回的 WBI key；不生成伪造标识，标识仅在当前会话内存。投稿采用对应官方空间 Referer。成功业务码里的 v_voucher / need_captcha 也视为验证错误，提供官方链接和登录/重试。头像复用封面共享下载/成功缓存，使用 160×160 缩略图并保留原图回退；图片不携带账号 Cookie。
+
+## 0.6 自有媒体模块与首阶段边界
+
+MediaTrack / ByteSpan 是独立类型；NativePlaybackBridge 通过 MediaReading 注入读取器。初次准备对每轨最多验证 3 个候选来源，成功后固定该来源。索引与 init 各最多 2 MiB；SIDX 支持直接引用与 v0/v1，拒绝间接索引、溢出、截断和文件越界。初始化当前只做顶层 ftyp/moov 与大小检查，尚未完成所有 sample entry / tfdt / 寻址兼容性验证。
+
+音视频各自生成不可变 VOD 目录，按独立时间刻度记录段长；不发布未经证明的 I-frame/独立分段标签。每个虚拟分片映射到原文件有界范围，局部 Range 平移回上游，Content-Range 对下游则相对虚拟文件。头部、实际字节数、完整长度与媒体类型不一致时不交付正文。响应失败映射为 502 并保留脱敏原因，应用优先展示该原因；没有后台自动重发。
+
+LocalMediaService 使用 Network.framework，仅监听 127.0.0.1，随机会话路径与精确 Host；限制头部 16 KiB、头部等待 5 秒、总连接 12、连接时限 35 秒。关闭会话取消其连接、下载和等待配额；两条媒体交付通道持有配额到发送完成，最多约 32 MiB 分片数据驻留（另有数据拷贝、索引及系统播放器开销，不能当作进程 RSS 上限）。HTTPMediaReader 的 URLSession 不使用 Cookie/凭据/缓存，只允许 User-Agent 与 Referer，重定向不跟随；16 MiB 是每次读取硬上限。
+
+PlayerController 注入 PlaybackPreparing，继续复用同一个 AVPlayer。分 P、画质和普通页面切换保留已有播放意图/进度机制。自研桥失败直接提示，不调用旧实现。回环交付是当前 macOS 开发版取舍，并不满足苹果关于避免本地服务器的交付建议；AirPlay、上架、公证和跨平台兼容仍需独立评估。

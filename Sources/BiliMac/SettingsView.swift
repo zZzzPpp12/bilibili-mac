@@ -13,11 +13,11 @@ struct SettingsView: View {
             Section("播放") { Toggle("打开视频后自动播放",isOn:$autoplay); Toggle("记住上次观看位置",isOn:$remember) }
             Section("弹幕") { Toggle("显示普通弹幕",isOn:$danmaku); Slider(value:$opacity,in:0.2...1) { Text("透明度") } }
             Section("关于 BiliMac") {
-                LabeledContent("版本",value:"0.5.0 · 开发预览")
+                LabeledContent("版本",value:"0.6.0 · 自研播放桥预览")
                 Text("一个为 macOS 打造的非官方哔哩哔哩客户端。与哔哩哔哩官方无关联。视频、商标与内容归各自权利人。")
                     .font(.callout).foregroundStyle(.secondary)
                 Link("项目与源代码",destination:URL(string:"https://github.com/zZzzPpp12/bilibili-mac")!)
-                Text("本项目使用 MIT 许可；播放桥接复用 BiliKit-Mac（shiinayane）和 Bilibili NEXT 的 MIT 组件。完整许可随源码与应用包附带。")
+                Text("本项目使用 MIT 许可；播放桥接由 BiliMac 自行实现，目前支持 H.264/AAC 点播。历史参考源码的 MIT 声明保留在仓库与随附许可中。")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("阅读开源许可证") { licenses = true }
             }

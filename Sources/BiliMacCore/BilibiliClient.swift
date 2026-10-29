@@ -1,6 +1,5 @@
 import Foundation
-import BiliModels
-import BiliNetworking
+import BiliMacMedia
 
 private final class RedirectPolicy: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
@@ -154,28 +153,29 @@ public actor BilibiliClient {
     }
     public static func parseManifest(_ data: [String: Any]) throws -> PlaybackManifest {
         guard let dash = data["dash"] as? [String: Any] else { throw ClientError.noPlayableMedia }
-        func parse(_ row: [String: Any], kind: MediaKind) -> MediaRepresentation? {
+        func parse(_ row: [String: Any], kind: TrackKind) -> MediaTrack? {
             let raw = [row["baseUrl"] as? String, row["base_url"] as? String].compactMap { $0 } + (row["backupUrl"] as? [String] ?? []) + (row["backup_url"] as? [String] ?? [])
             var seen = Set<URL>()
-            let urls = raw.compactMap { BiliMediaCDNURLPolicy().normalizedURL($0) }.filter { seen.insert($0).inserted }
+            let urls = raw.compactMap { MediaOrigin.normalizedURL($0) }.filter { seen.insert($0).inserted }
             guard let first = urls.first, let segment = row["SegmentBase"] as? [String: Any] ?? row["segment_base"] as? [String: Any] else { return nil }
-            func range(_ value: Any?) -> MediaByteRange? {
+            func range(_ value: Any?) -> ByteSpan? {
                 let parts = (value as? String ?? "").split(separator: "-", omittingEmptySubsequences: false)
                 guard parts.count == 2, let start = Int64(parts[0]), let end = Int64(parts[1]) else { return nil }
-                return try? MediaByteRange(start: start, endInclusive: end)
+                guard start >= 0, end >= start, end < Int64.max else { return nil }
+                return try? ByteSpan(offset: start, length: end-start+1)
             }
             guard let initial = range(segment["Initialization"] ?? segment["initialization"]), let index = range(segment["indexRange"] ?? segment["index_range"]) else { return nil }
             let codec = row["codecs"] as? String ?? ""
-            guard kind == .video ? codec.hasPrefix("avc1") || codec.hasPrefix("hvc1") || codec.hasPrefix("hev1") : codec.hasPrefix("mp4a") else { return nil }
-            let attributes = kind == .video ? try? VideoRepresentationAttributes(width: integer(row["width"]), height: integer(row["height"]), frameRate: nil) : nil
-            if kind == .video && attributes == nil { return nil }
-            return MediaRepresentation(id: integer(row["id"]), kind: kind, codecs: codec,
-                mimeType: row["mimeType"] as? String ?? row["mime_type"] as? String ?? (kind == .video ? "video/mp4" : "audio/mp4"),
-                bandwidth: row["bandwidth"] as? Int, videoAttributes: attributes, primaryURL: first, backupURLs: Array(urls.dropFirst()), segmentBase: SegmentBase(initialization: initial, index: index))
+            guard kind == .video ? codec.hasPrefix("avc1") : codec.hasPrefix("mp4a") else { return nil }
+            let width = integer(row["width"]), height = integer(row["height"])
+            if kind == .video && (width <= 0 || height <= 0) { return nil }
+            return try? MediaTrack(id: integer(row["id"]), kind: kind, codec: codec,
+                bandwidth: max(0, integer(row["bandwidth"])), width: width, height: height,
+                urls: [first] + Array(urls.dropFirst()), initialization: initial, index: index)
         }
         let videos = (dash["video"] as? [[String: Any]] ?? []).compactMap { parse($0, kind: .video) }.sorted { $0.id > $1.id }
         let audios = (dash["audio"] as? [[String: Any]] ?? []).compactMap { parse($0, kind: .audio) }
-        guard !videos.isEmpty, let audio = audios.max(by: { ($0.bandwidth ?? 0) < ($1.bandwidth ?? 0) }) else { throw ClientError.noPlayableMedia }
+        guard !videos.isEmpty, let audio = audios.max(by: { $0.bandwidth < $1.bandwidth }) else { throw ClientError.noPlayableMedia }
         var names: [Int: String] = [:]
         for row in data["support_formats"] as? [[String: Any]] ?? [] { names[integer(row["quality"])] = row["new_description"] as? String ?? row["display_desc"] as? String }
         return PlaybackManifest(videos: videos, audio: audio, qualityNames: names)

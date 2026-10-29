@@ -1,6 +1,6 @@
 import AVKit
 import Observation
-import BiliPlayback
+import BiliMacMedia
 import BiliMacCore
 
 @MainActor @Observable final class PlayerController {
@@ -20,7 +20,12 @@ import BiliMacCore
     var danmakuError: String?
     var rate: Float = 1
     var onProgress: ((Video, Int, Double) -> Void)?
-    private var session: PreparedPlaybackAsset?
+    private var session: PreparedStream?
+    private let bridge: any PlaybackPreparing
+    init(bridge: any PlaybackPreparing = NativePlaybackBridge()) {
+        self.bridge = bridge
+        configurePlayer()
+    }
     private var task: Task<Void, Never>?
     private var danmakuTask: Task<Void, Never>?
     private var generation = UUID()
@@ -32,7 +37,7 @@ import BiliMacCore
     private var positions: [String: Double] = [:]
     var isOpen: Bool { detail != nil || loading }
     var intendedPlaying: Bool { pending?.playing ?? playing }
-    init() {
+    private func configurePlayer() {
         player.preventsDisplaySleepDuringVideoPlayback = true
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
             MainActor.assumeIsolated {
@@ -73,8 +78,8 @@ import BiliMacCore
         self.manifest = manifest
         let preference = requested ?? AppSettings.defaults.integer(forKey: "quality")
         let selected = manifest.qualities.contains(preference) ? preference : manifest.qualities.first!
-        guard let video = manifest.videos.first(where: { $0.id == selected && $0.codecs.hasPrefix("avc1") }) ?? manifest.videos.first(where: { $0.id == selected }) else { throw ClientError.noPlayableMedia }
-        let asset = try await DASHToHLSBridge().prepare(video: video, audio: manifest.audio, headers: BilibiliClient.mediaHeaders, start: position > 0 ? position : nil)
+        guard let video = manifest.videos.first(where: { $0.id == selected && $0.codec.hasPrefix("avc1") }) ?? manifest.videos.first(where: { $0.id == selected }) else { throw ClientError.noPlayableMedia }
+        let asset = try await bridge.prepare(video: video, audio: manifest.audio, headers: BilibiliClient.mediaHeaders, start: position > 0 ? position : nil)
         guard identity == generation, !Task.isCancelled else { asset.stop(); return }
         session?.stop(); session = asset; self.quality = selected
         AppSettings.defaults.set(selected, forKey: "quality")
@@ -85,7 +90,20 @@ import BiliMacCore
                 guard let self, let item, identity == self.generation, self.player.currentItem === item else { return }
                 switch item.status {
                 case .readyToPlay:
+                    // EXT-X-START alone does not establish the media position
+                    // for an item prepared while paused. Keep pending intent
+                    // until the system has completed the explicit seek.
+                    if let target = self.pending?.position, target > 0 {
+                        let located = await withCheckedContinuation { continuation in
+                            self.player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
+                                             toleranceBefore: .zero, toleranceAfter: .zero) { continuation.resume(returning: $0) }
+                        }
+                        guard identity == self.generation, self.player.currentItem === item else { return }
+                        guard located else { self.fail(ClientError.server(0, "播放位置恢复失败，请重试。"), identity: identity); return }
+                    }
                     let intent = self.pending?.playing ?? playing
+                    let actual = self.player.currentTime().seconds
+                    if actual.isFinite { self.position = max(0, actual) }
                     self.pending = nil; self.loading = false
                     self.rate = Float(AppSettings.defaults.double(forKey: "playbackRate"))
                     if intent { self.player.playImmediately(atRate: self.rate) }
@@ -156,7 +174,7 @@ import BiliMacCore
     }
     private func fail(_ failure: Error, identity: UUID) {
         guard identity == generation, !(failure is CancellationError), !Task.isCancelled else { return }
-        loading = false; error = failure.localizedDescription; pending = nil
+        loading = false; error = session?.lastFailure ?? failure.localizedDescription; pending = nil
         danmakuTask?.cancel(); danmakuTask = nil
         player.pause(); player.replaceCurrentItem(with: nil); session?.stop(); session = nil
     }

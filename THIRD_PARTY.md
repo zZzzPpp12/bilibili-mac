@@ -10,11 +10,13 @@ BiliMac's application UI, business API adapter, credential storage, history and 
 - Immediate source: https://github.com/wzk112/Bilibili-NEXT at `3b7582c42c0695e5f8da1255d506f3802e2ed417`.
 - Bilibili NEXT's MIT notice is retained in `Vendor/BiliKitCore/BILIBILI-NEXT-LICENSE`.
 
-Included subset: BiliModels, BiliNetworking, BiliApplication, and BiliPlayback's Bridge / MediaIndex directories, including NEXT's BiliGlassBridge adapter. NEXT's media URL normalization, bridge signalling and bounded transport changes are retained as present in the source revision. The reference application's UI and account data are not included.
+### Status since 0.6.0
 
-Local changes: a bridge-only package manifest targeting macOS 26; `SelectedPlaybackAudioTrack` extracted from upstream PlayerTypes and `hlsCharacteristic` extracted from LoudnessAudioTrackMatching. The AVPlayerEngine, loudness tap and other unused playback components are excluded, so macOS 27 SDK audio symbols are not required. The core bridge sources are otherwise retained.
+The application and tests now build against the repository's `BiliMacMedia` target. The package has no BiliKitCore dependency and no automatic fallback to its bridge. Media types, URL policy, bounded HTTP Range reader, SIDX parsing, virtual-fragment HLS presentation and local transport are implemented in this repository. This is a specification-driven rewrite; its author has inspected the prior implementation, so it is not represented as a certified clean-room process.
 
-The two base64 MP4 test fixtures come from that same source revision. They are synthetic four-second AVC video and silent AAC audio, not captured user media. See `Tests/BiliMacTests/Fixtures/README.md`.
+`Vendor/BiliKitCore` remains in the source repository as historical reference, with its original notices. It is not built or linked into the 0.6.0 application. Historical MIT notices remain bundled during this preview transition; the presence of those notices does not mean the legacy bridge is being executed.
+
+The previous upstream blue-video/silent-audio fixtures have been removed from the current test resource directory. New moving-color and audible-beep fixtures are generated from this repository's own raw pixels/PCM by `Scripts/generate-media-fixtures.py`. FFmpeg is an external development tool used to encode those files; it is not bundled or linked into the application. Generation parameters and file hashes are documented in `Tests/BiliMacTests/Fixtures/README.md`.
 
 ## Protocol references
 
