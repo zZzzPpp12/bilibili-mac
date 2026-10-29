@@ -41,6 +41,8 @@ struct PlayerPage: View {
                         Text(detail.video.title).font(.system(size: 23, weight: .bold)).textSelection(.enabled)
                         HStack(spacing: 18) { Label(detail.video.author, systemImage:"person.crop.circle"); Label("\(DisplayFormat.count(detail.video.views)) 次播放", systemImage:"play.rectangle"); Text(detail.video.bvid) }.font(.callout).foregroundStyle(.secondary)
                     }
+                    VideoInteractionsView(store: store, model: store.interactions.model(for: detail.video))
+                        .id("\(detail.video.bvid)-\(store.account?.id ?? 0)")
                     VideoLibraryActions(store: store, video: detail.video).id(detail.video.bvid)
                     if detail.pages.count > 1 {
                         VStack(alignment:.leading, spacing:12) {

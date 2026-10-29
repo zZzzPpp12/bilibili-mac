@@ -23,6 +23,7 @@ enum Destination: String, CaseIterable, Identifiable {
     let client: BilibiliClient
     let library: LibraryModel
     let comments: CommentsModel
+    let interactions: InteractionStore
     let player = PlayerController()
     let isDemo = ProcessInfo.processInfo.arguments.contains("--demo")
     var destination: Destination = .recommended
@@ -33,7 +34,7 @@ enum Destination: String, CaseIterable, Identifiable {
     var account: Account? {
         didSet {
             if oldValue?.id != account?.id {
-                library.setAccount(account?.id); comments.reset()
+                library.setAccount(account?.id); comments.reset(); interactions.setAccount(account?.id)
             }
         }
     }
@@ -54,7 +55,15 @@ enum Destination: String, CaseIterable, Identifiable {
     var subtitle: String { activeSearch.isEmpty ? destination.subtitle : "关于「\(activeSearch)」的内容" }
     init() {
         let client = BilibiliClient(); self.client = client
-        library = LibraryModel(api: client); comments = CommentsModel(api: client)
+        let library = LibraryModel(api: client); self.library = library; comments = CommentsModel(api: client)
+        interactions = InteractionStore(api: client) { [weak library] mid in
+            Task {
+                guard let library, library.mid == mid else { return }
+                await library.loadFolders()
+                guard library.mid == mid else { return }
+                if library.loaded { await library.loadFavorites() }
+            }
+        }
         AppSettings.register()
         player.onProgress = { [weak self] video, cid, position in self?.record(video: video, cid: cid, position: position) }
     }
@@ -138,11 +147,11 @@ enum Destination: String, CaseIterable, Identifiable {
         guard identity == accountGeneration, !Task.isCancelled else { throw CancellationError() }
         await client.setCookies(cookies)
         guard identity == accountGeneration else { throw CancellationError() }
-        library.setAccount(nil); comments.reset()
+        library.setAccount(nil); comments.reset(); interactions.setAccount(nil)
         showLogin = false; snapshots = [:]; reload()
         do {
             let value = try await client.account()
-            if identity == accountGeneration { account = value; library.setAccount(value?.id); accountMessage = nil }
+            if identity == accountGeneration { account = value; library.setAccount(value?.id); interactions.setAccount(value?.id); accountMessage = nil }
         }
         catch { if identity == accountGeneration { accountMessage = "登录已保存，账号信息暂不可用，请稍后检查。" } }
     }

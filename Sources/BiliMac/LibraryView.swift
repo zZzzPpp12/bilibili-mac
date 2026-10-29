@@ -120,6 +120,7 @@ struct VideoLibraryActions: View {
                 Button {
                     if store.account == nil { store.showLogin = true } else { editingFavorites = true }
                 } label: { Label("收藏到…", systemImage: "star") }.buttonStyle(.glass)
+                    .disabled(store.interactions.model(for: video).busy)
                 Button {
                     if store.account == nil { store.showLogin = true }
                     else { Task { await model.setLater(SavedVideo(id: video.aid, title: video.title, cover: video.cover, video: video), saved: !saved) } }
@@ -141,6 +142,7 @@ struct VideoLibraryActions: View {
                     Task {
                         await model.loadFolders()
                         if model.loaded { await model.loadFavorites() }
+                        await store.interactions.favoritesSaved(aid: video.aid)
                     }
                 }.id("\(account.id)-\(video.aid)")
             }

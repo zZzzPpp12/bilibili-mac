@@ -3,7 +3,7 @@ import Testing
 import BiliMacCore
 
 /// Each session gets its own scenario, so parallel tests never share replies.
-private final class CommunityProtocol: URLProtocol {
+final class CommunityProtocol: URLProtocol {
     struct Reply {
         var status = 200
         var body: [String: Any]
@@ -35,7 +35,7 @@ private final class CommunityProtocol: URLProtocol {
     }
     override func stopLoading() {}
 }
-private struct APIScenario {
+struct APIScenario {
     let id = UUID().uuidString
     let client: BilibiliClient
     init(_ bodies: [[String: Any]]) {
@@ -47,10 +47,10 @@ private struct APIScenario {
     func login() async { await client.setCookies(["SESSDATA":"fixture-session", "bili_jct":"fixture+csrf&token", "DedeUserID":"10"]) }
     func finish() -> [URLRequest] { CommunityProtocol.finish(id) }
 }
-private func query(_ request: URLRequest) -> [String: String] {
+func query(_ request: URLRequest) -> [String: String] {
     Dictionary((URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { a, _ in a })
 }
-private func form(_ request: URLRequest) -> [String: String] {
+func form(_ request: URLRequest) -> [String: String] {
     var data = request.httpBody
     if data == nil, let stream = request.httpBodyStream {
         stream.open(); defer { stream.close() }; var buffer = [UInt8](repeating: 0, count: 1024); var result = Data()

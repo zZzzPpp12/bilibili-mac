@@ -2,7 +2,7 @@ import Testing
 import Foundation
 import AVFoundation
 import BiliPlayback
-import BiliMacCore
+@testable import BiliMacCore
 
 @Suite struct LiveTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["BILIMAC_LIVE_TEST"] == "1"))
@@ -28,7 +28,9 @@ import BiliMacCore
         #expect(!detail.pages.isEmpty)
         let qr = try await client.qrCode()
         #expect(!qr.key.isEmpty)
-        print("LIVE: public feed, signed detail and QR generation succeeded; no account loaded")
+        let preparation = try await client.request("/x/frontend/finger/spi").data
+        #expect((preparation["b_3"] as? String)?.isEmpty == false)
+        print("LIVE: public feed, signed detail, QR and official interaction identifier checked; no account loaded or writes")
     }
     @Test(.enabled(if: ProcessInfo.processInfo.environment["BILIMAC_LIVE_PLAYBACK"] == "1")) @MainActor
     func publicVideoActuallyPlays() async throws {

@@ -4,19 +4,22 @@ import BiliModels
 public enum ClientError: LocalizedError {
     case invalidResponse, http(Int), server(Int, String), noPlayableMedia, invalidInput
     case authenticationRequired, writeUncertain, paginationStalled, invalidFolderName
+    case invalidCoinAmount
     public var errorDescription: String? {
         switch self {
         case .invalidResponse: return "服务返回的数据不完整，请稍后重试。"
         case .http(412): return "请求暂受限制，请稍后重试或登录。"
         case .http(let code): return "连接失败（HTTP \(code)），请重试。"
         case .server(-101, _): return "登录已失效，请重新扫码。"
+        case .server(let code, _) where [-352, -401, -403].contains(code): return "互动请求被限制（\(code)），请在哔哩哔哩官方页面完成验证后刷新状态。"
         case .server(let code, let message): return "\(message)（\(code)）"
         case .noPlayableMedia: return "当前账号没有可播放的兼容媒体，请登录或选择其他视频。"
         case .invalidInput: return "请输入关键词、完整 BV 号或 B 站视频链接。"
-        case .authenticationRequired: return "请先扫码登录，再操作账号资料库。"
+        case .authenticationRequired: return "请先扫码登录，再使用账号操作。"
         case .writeUncertain: return "请求结果尚未确认，请先刷新状态核对，再决定是否继续操作。"
         case .paginationStalled: return "本页没有返回新的内容，请重试。"
         case .invalidFolderName: return "收藏夹名称需要 1–20 个字。"
+        case .invalidCoinAmount: return "本次请选择 1 或 2 枚硬币，且不能超过余额或视频投币上限。"
         }
     }
 }

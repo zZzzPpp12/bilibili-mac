@@ -6,7 +6,7 @@ private final class RedirectPolicy: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         // A credential-bearing API request must never follow an off-host redirect.
-        completionHandler(request.url?.host == task.originalRequest?.url?.host ? request : nil)
+        completionHandler(task.originalRequest?.httpMethod != "POST" && request.url?.host == task.originalRequest?.url?.host ? request : nil)
     }
 }
 
@@ -16,6 +16,7 @@ public actor BilibiliClient {
     private var cookies: [String: String] = [:]
     private var key: String?
     private var generation = UUID()
+    var authenticationID: UUID { generation }
     public init(session: URLSession? = nil) {
         let config = URLSessionConfiguration.ephemeral
         config.httpCookieStorage = nil; config.httpShouldSetCookies = false; config.urlCache = nil
@@ -55,11 +56,12 @@ public actor BilibiliClient {
     func requireAccount(_ mid: Int) throws {
         guard mid > 0, cookies["SESSDATA"] != nil, Int(cookies["DedeUserID"] ?? "") == mid else { throw ClientError.authenticationRequired }
     }
-    // Only the four explicitly supported library writes can carry credentials.
+    // Only explicitly supported account writes can carry credentials.
     // Transport failures are ambiguous: a server may already have applied the write.
-    func postLibrary(_ path: String, values: [String: String], mid: Int) async throws -> [String: Any] {
+    func postAuthenticated(_ path: String, values: [String: String], mid: Int, bvid: String? = nil) async throws -> [String: Any] {
         try requireAccount(mid)
-        guard ["/x/v3/fav/resource/deal", "/x/v3/fav/folder/add", "/x/v2/history/toview/add", "/x/v2/history/toview/del"].contains(path),
+        guard ["/x/v3/fav/resource/deal", "/x/v3/fav/folder/add", "/x/v2/history/toview/add", "/x/v2/history/toview/del",
+               "/x/web-interface/archive/like", "/x/web-interface/coin/add", "/x/web-interface/archive/like/triple"].contains(path),
               let csrf = cookies["bili_jct"], !csrf.isEmpty else { throw ClientError.authenticationRequired }
         try Task.checkCancellation()
         let identity = generation
@@ -71,6 +73,7 @@ public actor BilibiliClient {
             "\($0.key.addingPercentEncoding(withAllowedCharacters: allowed)!)=\($0.value.addingPercentEncoding(withAllowedCharacters: allowed)!)"
         }.joined(separator: "&").utf8)
         Self.mediaHeaders.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        if let bvid, VideoInput.bvid(bvid) == bvid { request.setValue("https://www.bilibili.com/video/" + bvid + "/", forHTTPHeaderField: "Referer") }
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.setValue("https://www.bilibili.com", forHTTPHeaderField: "Origin")
         request.setValue(cookies.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "; "), forHTTPHeaderField: "Cookie")
@@ -86,6 +89,19 @@ public actor BilibiliClient {
             if case ClientError.server = error { throw error }
             throw ClientError.writeUncertain
         }
+    }
+    func prepareInteraction(mid: Int) async throws {
+        try requireAccount(mid)
+        guard cookies["bili_jct"] != nil else { throw ClientError.authenticationRequired }
+        guard cookies["buvid3"] == nil else { return }
+        let identity = generation
+        let result = try await request("/x/frontend/finger/spi").data
+        try Task.checkCancellation()
+        guard identity == generation else { throw CancellationError() }
+        func valid(_ value: String) -> Bool { !value.isEmpty && value.utf8.count < 8192 && !value.contains(where: { $0 == ";" || $0.isNewline }) }
+        guard let id = result["b_3"] as? String, valid(id) else { throw ClientError.invalidResponse }
+        cookies["buvid3"] = id
+        if let id = result["b_4"] as? String, valid(id) { cookies["buvid4"] = id }
     }
     public func account() async throws -> Account? {
         let data = try await request("/x/web-interface/nav").data

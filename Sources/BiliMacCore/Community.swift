@@ -152,17 +152,17 @@ extension BilibiliClient: LibraryServing, CommentServing {
     }
     public func changeFavorites(mid: Int, aid: Int, changes: FavoriteChanges) async throws {
         guard aid > 0 else { throw ClientError.invalidInput }; guard !changes.isEmpty else { return }
-        _ = try await postLibrary("/x/v3/fav/resource/deal", values: ["rid":"\(aid)", "type":"2", "add_media_ids":changes.added.map(String.init).joined(separator: ","), "del_media_ids":changes.removed.map(String.init).joined(separator: ",")], mid: mid)
+        _ = try await postAuthenticated("/x/v3/fav/resource/deal", values: ["rid":"\(aid)", "type":"2", "add_media_ids":changes.added.map(String.init).joined(separator: ","), "del_media_ids":changes.removed.map(String.init).joined(separator: ",")], mid: mid)
     }
     public func createFolder(mid: Int, title: String, isPrivate: Bool) async throws -> FavoriteFolder {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, title.count <= 20 else { throw ClientError.invalidFolderName }
-        let data = try await postLibrary("/x/v3/fav/folder/add", values: ["title":title, "privacy":isPrivate ? "1" : "0"], mid: mid)
+        let data = try await postAuthenticated("/x/v3/fav/folder/add", values: ["title":title, "privacy":isPrivate ? "1" : "0"], mid: mid)
         guard let folder = FavoriteFolder.parse(data) else { throw ClientError.writeUncertain }; return folder
     }
     public func setWatchLater(mid: Int, aid: Int, saved: Bool) async throws {
         guard aid > 0 else { throw ClientError.invalidInput }
-        _ = try await postLibrary(saved ? "/x/v2/history/toview/add" : "/x/v2/history/toview/del", values: ["aid":"\(aid)"], mid: mid)
+        _ = try await postAuthenticated(saved ? "/x/v2/history/toview/add" : "/x/v2/history/toview/del", values: ["aid":"\(aid)"], mid: mid)
     }
     public func comments(aid: Int, sort: CommentSort, offset: String?) async throws -> CommentPage {
         guard aid > 0 else { throw ClientError.invalidInput }
