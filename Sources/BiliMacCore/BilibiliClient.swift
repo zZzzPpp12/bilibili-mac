@@ -61,7 +61,8 @@ public actor BilibiliClient {
     func postAuthenticated(_ path: String, values: [String: String], mid: Int, bvid: String? = nil) async throws -> [String: Any] {
         try requireAccount(mid)
         guard ["/x/v3/fav/resource/deal", "/x/v3/fav/folder/add", "/x/v2/history/toview/add", "/x/v2/history/toview/del",
-               "/x/web-interface/archive/like", "/x/web-interface/coin/add", "/x/web-interface/archive/like/triple"].contains(path),
+               "/x/web-interface/archive/like", "/x/web-interface/coin/add", "/x/web-interface/archive/like/triple",
+               "/x/v2/reply/add", "/x/v2/reply/action", "/x/v2/reply/del"].contains(path),
               let csrf = cookies["bili_jct"], !csrf.isEmpty else { throw ClientError.authenticationRequired }
         try Task.checkCancellation()
         let identity = generation
@@ -83,7 +84,9 @@ public actor BilibiliClient {
             guard (response as? HTTPURLResponse)?.statusCode == 200,
                   let root = try JSONSerialization.jsonObject(with: data) as? [String: Any], let code = root["code"] as? Int else { throw ClientError.writeUncertain }
             guard code == 0 else { throw ClientError.server(code, root["message"] as? String ?? "操作未成功") }
-            return root["data"] as? [String: Any] ?? [:]
+            let result = root["data"] as? [String: Any] ?? [:]
+            if result["need_captcha"] as? Bool == true { throw ClientError.server(-352, "需要完成官方验证") }
+            return result
         } catch {
             guard identity == generation else { throw CancellationError() }
             if case ClientError.server = error { throw error }

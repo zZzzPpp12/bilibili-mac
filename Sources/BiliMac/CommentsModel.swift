@@ -39,22 +39,24 @@ import BiliMacCore
         guard sort != self.sort else { return }
         reset(aid: aid, sort: sort); await load()
     }
-    func load(more: Bool = false) async {
-        guard aid > 0, !more || (!loading && hasMore) else { return }
+    @discardableResult func load(more: Bool = false) async -> Bool {
+        guard aid > 0, !more || (!loading && hasMore) else { return false }
         let session = identity; requestIdentity = UUID(); let token = requestIdentity
         let next = more ? offset : nil
         loading = true; error = nil
         defer { if session == identity && token == requestIdentity { loading = false } }
         do {
             let result = try await api.comments(aid: aid, sort: sort, offset: next)
-            guard session == identity, token == requestIdentity, !Task.isCancelled else { return }
+            guard session == identity, token == requestIdentity, !Task.isCancelled else { return false }
             let combined = Comment.unique((more ? items : []) + result.items)
             // Opaque tokens may repeat. Only a page with no new content stalls.
             if more && combined.count == items.count && result.next != nil { throw ClientError.paginationStalled }
             items = combined; total = result.total; offset = result.next; hasMore = result.next != nil; loaded = true
             if !more { threadIdentity = UUID(); threads = [:] }
+            return true
         } catch {
             if session == identity, token == requestIdentity, !Task.isCancelled { self.error = error.localizedDescription; failedMore = more }
+            return false
         }
     }
     func retry() async { await load(more: failedMore) }

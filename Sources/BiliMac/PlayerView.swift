@@ -59,7 +59,8 @@ struct PlayerPage: View {
                     if let error = store.player.danmakuError { Label(error,systemImage:"text.bubble").font(.caption).foregroundStyle(.secondary) }
                     if !detail.description.isEmpty { Text(detail.description).font(.callout).foregroundStyle(.secondary).lineSpacing(6).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading).padding(20).background(.quaternary.opacity(0.3),in:.rect(cornerRadius:14)) }
                     if !store.isDemo, detail.video.aid > 0 {
-                        CommentsSection(model: store.comments, aid: detail.video.aid, accountID: store.account?.id)
+                        CommentsSection(model: store.comments, actions: store.commentActions.model(for: detail.video), aid: detail.video.aid, accountID: store.account?.id) { store.showLogin = true }
+                            .id("\(detail.video.bvid)-\(store.account?.id ?? 0)")
                     }
                 }
             }.padding(30)

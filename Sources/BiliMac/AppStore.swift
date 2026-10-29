@@ -23,6 +23,7 @@ enum Destination: String, CaseIterable, Identifiable {
     let client: BilibiliClient
     let library: LibraryModel
     let comments: CommentsModel
+    let commentActions: CommentActionsStore
     let interactions: InteractionStore
     let player = PlayerController()
     let isDemo = ProcessInfo.processInfo.arguments.contains("--demo")
@@ -34,7 +35,7 @@ enum Destination: String, CaseIterable, Identifiable {
     var account: Account? {
         didSet {
             if oldValue?.id != account?.id {
-                library.setAccount(account?.id); comments.reset(); interactions.setAccount(account?.id)
+                library.setAccount(account?.id); comments.reset(); interactions.setAccount(account?.id); commentActions.setAccount(account?.id)
             }
         }
     }
@@ -56,6 +57,7 @@ enum Destination: String, CaseIterable, Identifiable {
     init() {
         let client = BilibiliClient(); self.client = client
         let library = LibraryModel(api: client); self.library = library; comments = CommentsModel(api: client)
+        commentActions = CommentActionsStore(api: client)
         interactions = InteractionStore(api: client) { [weak library] mid in
             Task {
                 guard let library, library.mid == mid else { return }
@@ -147,11 +149,11 @@ enum Destination: String, CaseIterable, Identifiable {
         guard identity == accountGeneration, !Task.isCancelled else { throw CancellationError() }
         await client.setCookies(cookies)
         guard identity == accountGeneration else { throw CancellationError() }
-        library.setAccount(nil); comments.reset(); interactions.setAccount(nil)
+        library.setAccount(nil); comments.reset(); interactions.setAccount(nil); commentActions.setAccount(nil)
         showLogin = false; snapshots = [:]; reload()
         do {
             let value = try await client.account()
-            if identity == accountGeneration { account = value; library.setAccount(value?.id); interactions.setAccount(value?.id); accountMessage = nil }
+            if identity == accountGeneration { account = value; library.setAccount(value?.id); interactions.setAccount(value?.id); commentActions.setAccount(value?.id); accountMessage = nil }
         }
         catch { if identity == accountGeneration { accountMessage = "登录已保存，账号信息暂不可用，请稍后检查。" } }
     }

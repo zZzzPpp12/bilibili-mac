@@ -4,7 +4,7 @@ import BiliModels
 public enum ClientError: LocalizedError {
     case invalidResponse, http(Int), server(Int, String), noPlayableMedia, invalidInput
     case authenticationRequired, writeUncertain, paginationStalled, invalidFolderName
-    case invalidCoinAmount
+    case invalidCoinAmount, invalidCommentText
     public var errorDescription: String? {
         switch self {
         case .invalidResponse: return "服务返回的数据不完整，请稍后重试。"
@@ -20,6 +20,7 @@ public enum ClientError: LocalizedError {
         case .paginationStalled: return "本页没有返回新的内容，请重试。"
         case .invalidFolderName: return "收藏夹名称需要 1–20 个字。"
         case .invalidCoinAmount: return "本次请选择 1 或 2 枚硬币，且不能超过余额或视频投币上限。"
+        case .invalidCommentText: return "评论不能为空，且不能超过 1000 个字符。"
         }
     }
 }
