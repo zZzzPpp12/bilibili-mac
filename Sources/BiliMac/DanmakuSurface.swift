@@ -12,6 +12,11 @@ import BiliMacCore
     private var plannedSize = CGSize.zero
     private var plannedTime = -100.0
     private var alpha: Float = 0.8
+    private var displayEnabled = true
+    private var canvasSize: CGSize?
+    #if DEBUG
+    private(set) var planBuildCount = 0
+    #endif
     @MainActor private final class Target: NSObject {
         weak var view: DanmakuSurface?
         @objc func tick(_ link:CADisplayLink) { view?.tick() }
@@ -19,16 +24,24 @@ import BiliMacCore
     private let target = Target()
     override var isFlipped: Bool { true }
     override func hitTest(_ point:NSPoint) -> NSView? { nil }
-    func update(player:AVPlayer, items:[Danmaku], opacity:Double) {
+    func update(player:AVPlayer, items:[Danmaku], opacity:Double, visible: Bool = true, canvasSize: CGSize? = nil) {
         self.player = player; alpha = Float(opacity)
+        self.canvasSize = canvasSize
         if self.items != items { self.items = items; plannedTime = -100 }
+        displayEnabled = visible; isHidden = !visible
+        guard visible else { frameLink?.isPaused = true; return }
         if frameLink == nil {
             target.view = self; let link = displayLink(target:target,selector:#selector(Target.tick(_:)))
             link.add(to:.main,forMode:.common); frameLink = link
         }
-        tick()
+        // Let the next display callback use the final view size, rather than
+        // laying out comments synchronously in the middle of a scroll update.
+        frameLink?.isPaused = false
     }
     private func prepare(_ time:Double) {
+        #if DEBUG
+        planBuildCount += 1
+        #endif
         plannedTime = time; plannedSize = bounds.size; plan = []
         let lanes = max(1,min(10,Int(bounds.height * 0.65 / 32)))
         var occupied = [[Placement]](repeating:[],count:lanes)
@@ -51,6 +64,8 @@ import BiliMacCore
         }
     }
     private func tick() {
+        guard displayEnabled else { frameLink?.isPaused = true; return }
+        if let canvasSize, abs(bounds.width-canvasSize.width) > 1 || abs(bounds.height-canvasSize.height) > 1 { return }
         guard let player, window != nil, !items.isEmpty, bounds.width > 0 else { frameLink?.isPaused = true; clear(); return }
         let time = player.currentTime().seconds
         guard time.isFinite else { return }
@@ -78,6 +93,10 @@ import BiliMacCore
         CATransaction.commit()
     }
     private func clear() { text.values.forEach { $0.removeFromSuperlayer() }; text = [:] }
+    override func layout() {
+        super.layout()
+        if displayEnabled { frameLink?.isPaused = false }
+    }
     func stop() { frameLink?.invalidate(); frameLink = nil; player = nil; items = []; clear() }
     isolated deinit { frameLink?.invalidate() }
 }

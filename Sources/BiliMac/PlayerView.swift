@@ -6,24 +6,17 @@ struct PlayerPage: View {
     @Bindable var store: AppStore
     @AppStorage("danmakuEnabled", store: AppSettings.defaults) private var enabled = true
     @AppStorage("danmakuOpacity", store: AppSettings.defaults) private var opacity = 0.8
-    @State private var presentation = ScrollPlaybackPresentation()
+    @State private var layout = PlayerPresentationLayout()
+    private let contentSpace = "player-content"
     private let videoAnchor = "inline-video"
     var body: some View {
         ScrollViewReader { scroll in
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    ZStack {
-                        if presentation.inlineVisible {
-                            playbackSurface(mini: false)
-                        } else {
-                            Color.black.overlay {
-                                Label(presentation.dismissed ? "视频已暂停并收起" : "视频已移至右下角小窗", systemImage: "pip")
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }.aspectRatio(16/9, contentMode: .fit).frame(maxHeight: 580).background(.black).clipShape(.rect(cornerRadius: 18))
+                    InlinePlaybackPlaceholder(layout: layout)
+                        .aspectRatio(16/9, contentMode: .fit).frame(maxHeight: 580).clipShape(.rect(cornerRadius: 18))
                         .id(videoAnchor)
-                        .onScrollVisibilityChange(threshold: 0.2) { presentation.setInlineVisible($0) }
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(contentSpace)) } action: { layout.setInlineFrame($0) }
                     HStack(spacing: 18) {
                         if let manifest = store.player.manifest {
                             Picker("画质", selection: Binding(get: { store.player.quality }, set: { store.player.change(client:store.client,quality:$0) })) {
@@ -72,60 +65,21 @@ struct PlayerPage: View {
                         }
                     }
                 }.padding(30)
+                    .coordinateSpace(name: contentSpace)
+                    .overlay(alignment: .topLeading) {
+                        PlayerPresentationLayer(store: store, layout: layout, danmakuEnabled: enabled, danmakuOpacity: opacity) {
+                            withAnimation(.easeInOut(duration: 0.2)) { scroll.scrollTo(videoAnchor, anchor: .top) }
+                        }
+                    }
             }
-            .overlay(alignment: .bottomTrailing) {
-                if presentation.floating && store.player.isOpen {
-                    floatingPlayer {
-                        withAnimation(.easeInOut(duration: 0.2)) { scroll.scrollTo(videoAnchor, anchor: .top) }
-                    }.padding(20)
-                }
-            }
+            .onScrollGeometryChange(for: PlayerViewport.self) { geometry in
+                PlayerViewport(visibleRect: geometry.visibleRect, containerSize: geometry.containerSize)
+            } action: { _, value in layout.setViewport(value) }
             .onChange(of: store.player.requestedBVID) { _, _ in
-                presentation.reset()
+                layout.reset()
                 scroll.scrollTo(videoAnchor, anchor: .top)
             }
         }
-    }
-    private func playbackSurface(mini: Bool) -> some View {
-        ZStack {
-            NativePlayer(controller: store.player, items: !mini && enabled ? store.player.danmaku : [], opacity: mini ? 0 : opacity)
-            if store.player.loading {
-                VStack(spacing: 10) { ProgressView().tint(.white); Text("正在准备播放…").font(.callout) }
-                    .foregroundStyle(.white).padding(18).background(.black.opacity(0.7), in: .rect(cornerRadius: 12))
-            }
-            if let error = store.player.error {
-                VStack(spacing: 12) {
-                    Image(systemName: "play.slash").font(.title2)
-                    Text(error).multilineTextAlignment(.center).font(mini ? .caption : .callout).lineLimit(mini ? 3 : nil)
-                    if !store.isDemo { Button("重新播放") { if let bvid = store.player.requestedBVID { store.open(bvid) } }.buttonStyle(.glass) }
-                }.foregroundStyle(.white).padding(18).frame(maxWidth: 470).background(.black.opacity(0.8), in: .rect(cornerRadius: 12))
-            }
-        }
-    }
-    private func floatingPlayer(returnToVideo: @escaping () -> Void) -> some View {
-        VStack(spacing: 10) {
-            HStack {
-                Text("边看边聊").font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    store.player.pause(); presentation.dismiss()
-                } label: { Image(systemName: "xmark") }
-                    .buttonStyle(.plain).help("暂停并收起小窗").accessibilityLabel("暂停并收起自动小窗")
-            }
-            playbackSurface(mini: true).aspectRatio(16/9, contentMode: .fit)
-                .background(.black).clipShape(.rect(cornerRadius: 10))
-            Text(store.player.detail?.video.title ?? "正在加载…").font(.callout.weight(.semibold)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-            HStack {
-                Button { store.player.toggle() } label: { Image(systemName: store.player.intendedPlaying ? "pause.fill" : "play.fill") }
-                    .accessibilityLabel(store.player.intendedPlaying ? "暂停小窗视频" : "播放小窗视频")
-                    .disabled(store.player.error != nil)
-                Spacer()
-                Button("回到视频", action: returnToVideo)
-            }.buttonStyle(.glass)
-        }.padding(12).frame(width: 320).glassEffect(.regular, in: .rect(cornerRadius: 18))
-            .shadow(color: .black.opacity(0.24), radius: 16, y: 5)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("automatic-mini-player")
     }
 }
 
@@ -150,9 +104,13 @@ final class PlayerSurface: AVPlayerView, NSGestureRecognizerDelegate {
     fileprivate var presentationOwner: UUID?
     let overlay = DanmakuSurface()
     private var wheelMonitor: Any?
+    #if DEBUG
+    private(set) var windowChangeCount = 0
+    #endif
     override init(frame: NSRect) {
         super.init(frame:frame); controlsStyle = .inline; videoGravity = .resizeAspect; allowsPictureInPicturePlayback = true
         overlay.wantsLayer = true; overlay.layer?.backgroundColor = NSColor.clear.cgColor
+        overlay.autoresizingMask = [.width, .height]
         contentOverlayView?.addSubview(overlay)
         let click = NSClickGestureRecognizer(target: self, action: #selector(toggleFromVideo))
         click.delegate = self; click.delaysPrimaryMouseButtonEvents = false
@@ -162,6 +120,9 @@ final class PlayerSurface: AVPlayerView, NSGestureRecognizerDelegate {
     override func layout() { super.layout(); overlay.frame = contentOverlayView?.bounds ?? bounds }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow(); stopInputMonitoring()
+        #if DEBUG
+        windowChangeCount += 1
+        #endif
         guard window != nil else { return }
         // AVKit's child views consume wheel events before AVPlayerView's own
         // responder method. Route only picture events, in this window, before
@@ -243,6 +204,8 @@ struct NativePlayer: NSViewRepresentable {
     let controller: PlayerController
     let items: [Danmaku]
     let opacity: Double
+    var showsDanmaku = true
+    var danmakuCanvasSize: CGSize?
     func makeNSView(context:Context) -> PlayerContainer {
         let surface = controller.surface
         // Keep AVKit's controls controller stable as the same view moves.
@@ -253,7 +216,7 @@ struct NativePlayer: NSViewRepresentable {
     func updateNSView(_ container: PlayerContainer,context:Context) {
         guard container.ownsSurface else { return }
         let surface = controller.surface
-        surface.overlay.update(player:controller.player, items:items, opacity:opacity)
+        surface.overlay.update(player:controller.player, items:items, opacity:opacity, visible: showsDanmaku, canvasSize: danmakuCanvasSize)
     }
     static func dismantleNSView(_ view: PlayerContainer,coordinator:()) { view.releaseSurface() }
 }

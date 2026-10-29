@@ -102,3 +102,13 @@ PlayerSurface 使用限定在画面区域的 AppKit 单击手势切换播放意�
 PlayerPage 在固定尺寸的视频占位上监听滚动可见性，低于 20% 时切换为内容区右下角浮动展示；滚回或点击“回到视频”恢复内嵌展示。ScrollPlaybackPresentation 仅管理可见性与本次收起状态，AVPlayer、当前项和媒体会话继续由 PlayerController 持有。位置切换不调用 prepare/open，不重建音视频资源。PlayerController 延迟创建并持有唯一 PlayerSurface，展示槽 PlayerContainer 通过所有权令牌迁移该视图；旧槽延迟拆卸不能解绑新槽，避免暂停时重建视频图层导致黑屏。关闭自动小窗调用 pause，连同尚在加载中的播放意图一起暂停；同一轮评论浏览不自动弹回，视频重新可见后解除收起状态。
 
 自动小窗属于 PlayerPage；离页后仍由 RootView 使用原 MiniPlayer，因此不会叠加两个小窗。列表小窗的关闭仍调用 stop，与评论区的暂停收起保持独立语义。
+
+## 0.6.2 固定播放视图的滚动展示层
+
+自动小窗改为 PlayerPage 滚动内容上的固定 PlayerPresentationLayer；NativePlayer 在该层中始终处于同一结构位置。占位报告内容坐标，ScrollGeometry 报告可见区域；内嵌时使用占位矩形，小窗时使用可见区域右下角矩形。只有原生容器的 frame/offset 与装饰更新，不再在两个 SwiftUI 展示槽之间迁移 PlayerSurface，避免切换引发 AVKit 窗口、图层及输入监视器重新挂载。离页进入 RootView 的列表小窗仍保留所有权令牌迁移机制。
+
+PlayerPresentationLayout 独立观察滚动几何，评论列表不读取该几何状态。ScrollPlaybackPresentation 使用 20% 进入、40% 返回的迟滞阈值，防止边界抖动；收起仅暂停并隐藏展示，滚回解除收起。视频资源、AVPlayerItem、解码会话及播放意图不因展示位置变化而重建。AVKit 控制条样式继续固定为 inline，避免动态样式切换的既有 KVO 风险。
+
+DanmakuSurface 在浮动时隐藏并暂停 display link，保留条目、文字层与排轨计划；回到内嵌时在下一帧恢复。原生叠加层随父视图自动调整尺寸，并以预期内嵌画布尺寸校验实际 bounds，避免尚处于小窗尺寸时提前排轨，再在尺寸恢复后重复计算。真正换视频、改变画布或超出计划时间范围时仍按原策略更新。
+
+DEBUG 计数只用于验证窗口挂载和弹幕排轨次数，不进入 Release。集成测试通过实际 NSHostingView / NSScrollView / NSWindow 承载生产展示层，使用项目自造媒体验证 20 次往返、同一播放项与实际媒体时间推进；不读取账号或发起真实账号写入。

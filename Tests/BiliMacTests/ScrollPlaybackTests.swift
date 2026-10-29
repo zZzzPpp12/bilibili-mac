@@ -26,6 +26,30 @@ import Testing
         #expect(presentation.inlineVisible); #expect(!presentation.dismissed)
         presentation.setInlineVisible(false); #expect(presentation.floating)
     }
+    @Test func boundaryHysteresisPreventsRepeatedSwitchesWhileScrollingSlowly() {
+        var presentation = ScrollPlaybackPresentation()
+        presentation.updateVisibleFraction(0.19)
+        #expect(presentation.floating)
+        for value in [0.21, 0.19, 0.3, 0.39] { presentation.updateVisibleFraction(value); #expect(presentation.floating) }
+        presentation.updateVisibleFraction(0.4); #expect(!presentation.floating)
+        for value in [0.39, 0.3, 0.21] { presentation.updateVisibleFraction(value); #expect(!presentation.floating) }
+        presentation.updateVisibleFraction(0.2); #expect(presentation.floating)
+    }
+    @Test func floatingGeometryFollowsViewportWithoutChangingContentOrLosingDismissal() {
+        let layout = PlayerPresentationLayout()
+        layout.setInlineFrame(CGRect(x:30,y:30,width:940,height:528.75))
+        layout.setViewport(.init(visibleRect:CGRect(x:0,y:0,width:1000,height:700),containerSize:CGSize(width:1000,height:700)))
+        #expect(!layout.floating); #expect(layout.videoFrame == layout.inlineFrame)
+        layout.setViewport(.init(visibleRect:CGRect(x:0,y:650,width:1000,height:700),containerSize:CGSize(width:1000,height:700)))
+        #expect(layout.floating)
+        #expect(layout.viewport.visibleRect.contains(layout.chromeFrame))
+        #expect(layout.chromeFrame.contains(layout.videoFrame))
+        layout.dismiss(); #expect(!layout.showsVideo)
+        layout.setViewport(.init(visibleRect:CGRect(x:0,y:900,width:1000,height:700),containerSize:CGSize(width:1000,height:700)))
+        #expect(!layout.floating)
+        layout.setViewport(.init(visibleRect:CGRect(x:0,y:0,width:1000,height:700),containerSize:CGSize(width:1000,height:700)))
+        #expect(layout.showsVideo); #expect(!layout.presentation.dismissed)
+    }
     @Test func remountingKeepsOneSurfaceAndOldSlotCannotDetachItsNewOwner() {
         let controller = PlayerController()
         defer { controller.stop() }
