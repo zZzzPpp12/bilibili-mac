@@ -31,6 +31,7 @@ import BiliMacCore
     private var pending: (position: Double, playing: Bool)?
     private var positions: [String: Double] = [:]
     var isOpen: Bool { detail != nil || loading }
+    var intendedPlaying: Bool { pending?.playing ?? playing }
     init() {
         player.preventsDisplaySleepDuringVideoPlayback = true
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
@@ -49,7 +50,7 @@ import BiliMacCore
             }
         }
     }
-    func open(_ bvid: String, client: BilibiliClient, record: WatchRecord?) {
+    func open(_ bvid: String, client: BilibiliClient, record: WatchRecord?, playing: Bool? = nil) {
         stop(); let identity = generation; loading = true; requestedBVID = bvid
         positions = record?.positions ?? [:]
         task = Task {
@@ -60,7 +61,7 @@ import BiliMacCore
                 let page = detail.pages.first { $0.id == record?.cid } ?? detail.pages[0]
                 cid = page.id
                 let position = WatchRecord.resumePosition(record?.position ?? 0, duration: Double(page.duration))
-                try await prepare(client: client, quality: nil, position: position, playing: AppSettings.defaults.bool(forKey: "autoPlay"), identity: identity)
+                try await prepare(client: client, quality: nil, position: position, playing: playing ?? AppSettings.defaults.bool(forKey: "autoPlay"), identity: identity)
             } catch { fail(error, identity: identity) }
         }
     }

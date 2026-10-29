@@ -24,18 +24,27 @@ enum Destination: String, CaseIterable, Identifiable {
     let library: LibraryModel
     let comments: CommentsModel
     let commentActions: CommentActionsStore
+    let searches: SearchModel
+    let profiles: UserProfileStore
     let interactions: InteractionStore
     let player = PlayerController()
     let isDemo = ProcessInfo.processInfo.arguments.contains("--demo")
     var destination: Destination = .recommended
     var query = ""
-    var activeSearch = ""
+    var activeSearch: String { searches.term }
+    struct ProfileRoute: Identifiable {
+        let id = UUID()
+        let mid: Int
+        let returnRecord: WatchRecord?
+        let returnPlaying: Bool
+    }
+    var profilePath: [ProfileRoute] = []
     var videos: [Video] = []
     var history: [WatchRecord] = []
     var account: Account? {
         didSet {
             if oldValue?.id != account?.id {
-                library.setAccount(account?.id); comments.reset(); interactions.setAccount(account?.id); commentActions.setAccount(account?.id)
+                library.setAccount(account?.id); comments.reset(); interactions.setAccount(account?.id); commentActions.setAccount(account?.id); profiles.setAccount(account?.id)
             }
         }
     }
@@ -54,8 +63,10 @@ enum Destination: String, CaseIterable, Identifiable {
     private var historyRepository: HistoryRepository { HistoryRepository(file: isDemo ? FileManager.default.temporaryDirectory.appendingPathComponent("BiliMac-demo-history.json") : nil) }
     var title: String { activeSearch.isEmpty ? destination.rawValue : "搜索结果" }
     var subtitle: String { activeSearch.isEmpty ? destination.subtitle : "关于「\(activeSearch)」的内容" }
-    init() {
-        let client = BilibiliClient(); self.client = client
+    init(client: BilibiliClient = BilibiliClient()) {
+        self.client = client
+        searches = SearchModel(api: ProcessInfo.processInfo.arguments.contains("--demo") ? DemoSearchService() : client)
+        profiles = UserProfileStore(api: client)
         let library = LibraryModel(api: client); self.library = library; comments = CommentsModel(api: client)
         commentActions = CommentActionsStore(api: client)
         interactions = InteractionStore(api: client) { [weak library] mid in
@@ -83,7 +94,7 @@ enum Destination: String, CaseIterable, Identifiable {
     func select(_ next: Destination) {
         if activeSearch.isEmpty && !videos.isEmpty { snapshots[destination.rawValue] = (videos, page, hasMore) }
         feedTask?.cancel(); feedGeneration = UUID(); loading = false
-        player.saveProgress(); showPlayer = false; destination = next; activeSearch = ""; query = ""; error = nil
+        player.saveProgress(); showPlayer = false; destination = next; searches.close(); profilePath = []; query = ""; error = nil
         guard next == .recommended || next == .popular else { return }
         if isDemo { videos = DemoData.videos; hasMore = false; return }
         if let snapshot = snapshots[next.rawValue] { (videos, page, hasMore) = snapshot }
@@ -93,9 +104,16 @@ enum Destination: String, CaseIterable, Identifiable {
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty else { return }
         if let bvid = VideoInput.bvid(term) { open(bvid); return }
-        player.saveProgress(); showPlayer = false; activeSearch = term; videos = []; reload()
+        if let mid = UserInput.mid(term) { openProfile(mid); return }
+        feedTask?.cancel(); feedGeneration = UUID(); loading = false
+        player.saveProgress(); showPlayer = false; profilePath = []; searches.submit(term)
     }
     func reload() {
+        if !showPlayer, let route = profilePath.last {
+            let profile = profiles.model(mid: route.mid)
+            Task { await profile.refreshProfile(); await profile.loadVideos() }; return
+        }
+        if !activeSearch.isEmpty { searches.load(); return }
         if activeSearch.isEmpty {
             if destination == .history { return }
             if destination == .favorites {
@@ -109,11 +127,11 @@ enum Destination: String, CaseIterable, Identifiable {
     private func fetch(more: Bool) {
         feedTask?.cancel(); feedGeneration = UUID(); let identity = feedGeneration
         if isDemo { videos = activeSearch.isEmpty ? DemoData.videos : DemoData.videos.filter { $0.title.localizedCaseInsensitiveContains(activeSearch) }; loading = false; hasMore = false; return }
-        let next = more ? page + 1 : 1, term = activeSearch, recommended = destination == .recommended
+        let next = more ? page + 1 : 1, recommended = destination == .recommended
         loading = true; error = nil
         feedTask = Task {
             do {
-                let rows = try await (term.isEmpty ? client.feed(recommended: recommended, page: next) : client.search(term, page: next))
+                let rows = try await client.feed(recommended: recommended, page: next)
                 guard identity == feedGeneration, !Task.isCancelled else { return }
                 videos = Video.unique((more ? videos : []) + rows); page = next; hasMore = !rows.isEmpty; loading = false
             } catch {
@@ -128,6 +146,28 @@ enum Destination: String, CaseIterable, Identifiable {
         let previous = AppSettings.defaults.bool(forKey: "rememberPosition") ? history.first { $0.id == bvid } : nil
         if isDemo, let video = DemoData.videos.first(where: { $0.bvid == bvid }) { player.showDemo(video); return }
         player.open(bvid, client: client, record: previous)
+    }
+    func openProfile(_ mid: Int) {
+        guard mid > 0 else { return }
+        if isDemo { accountMessage = "演示模式不请求用户主页，请正常启动后使用。"; return }
+        if !showPlayer, profilePath.last?.mid == mid { return }
+        player.saveProgress()
+        let record: WatchRecord? = showPlayer ? player.detail.flatMap { detail in
+            guard player.cid > 0 else { return nil }
+            return WatchRecord(video: detail.video, cid: player.cid, position: player.position,
+                               positions: history.first(where: { $0.id == detail.video.id })?.positions ?? [:])
+        } : nil
+        profilePath.append(ProfileRoute(mid: mid, returnRecord: record, returnPlaying: player.intendedPlaying))
+        showPlayer = false
+    }
+    func backFromProfile() {
+        guard let route = profilePath.popLast() else { return }
+        guard let record = route.returnRecord, player.isOpen else { return }
+        if player.detail?.video.bvid != record.video.bvid || player.cid != record.cid {
+            player.saveProgress(); comments.reset()
+            player.open(record.video.bvid, client: client, record: record, playing: route.returnPlaying)
+        }
+        showPlayer = true
     }
     func record(video: Video, cid: Int, position: Double) {
         guard position.isFinite, position >= 0, cid > 0 else { return }
@@ -149,11 +189,11 @@ enum Destination: String, CaseIterable, Identifiable {
         guard identity == accountGeneration, !Task.isCancelled else { throw CancellationError() }
         await client.setCookies(cookies)
         guard identity == accountGeneration else { throw CancellationError() }
-        library.setAccount(nil); comments.reset(); interactions.setAccount(nil); commentActions.setAccount(nil)
+        library.setAccount(nil); comments.reset(); interactions.setAccount(nil); commentActions.setAccount(nil); profiles.setAccount(nil)
         showLogin = false; snapshots = [:]; reload()
         do {
             let value = try await client.account()
-            if identity == accountGeneration { account = value; library.setAccount(value?.id); interactions.setAccount(value?.id); commentActions.setAccount(value?.id); accountMessage = nil }
+            if identity == accountGeneration { account = value; library.setAccount(value?.id); interactions.setAccount(value?.id); commentActions.setAccount(value?.id); profiles.setAccount(value?.id); accountMessage = nil }
         }
         catch { if identity == accountGeneration { accountMessage = "登录已保存，账号信息暂不可用，请稍后检查。" } }
     }

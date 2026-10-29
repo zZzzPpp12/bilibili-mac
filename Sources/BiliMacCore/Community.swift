@@ -68,6 +68,7 @@ public enum CommentSort: String, CaseIterable, Identifiable, Sendable {
 public struct Comment: Identifiable, Hashable, Sendable {
     public let id: Int
     public let mid: Int
+    public let avatar: String
     public let root: Int
     public let name: String
     public let message: String
@@ -77,10 +78,11 @@ public struct Comment: Identifiable, Hashable, Sendable {
     public var liked: Bool?
     public let replyCount: Int
     public let children: [Comment]
-    public init(id: Int, name: String, message: String, date: Date = .distantPast, location: String = "", likes: Int = 0, replyCount: Int = 0, children: [Comment] = [], mid: Int = 0, root: Int = 0, liked: Bool? = nil) {
+    public init(id: Int, name: String, message: String, date: Date = .distantPast, location: String = "", likes: Int = 0, replyCount: Int = 0, children: [Comment] = [], mid: Int = 0, root: Int = 0, liked: Bool? = nil, avatar: String = "") {
         self.id = id; self.name = name; self.message = message; self.date = date; self.location = location
         self.likes = likes; self.replyCount = replyCount; self.children = children
         self.mid = mid; self.root = root; self.liked = liked
+        self.avatar = avatar
     }
     static func parse(_ row: [String: Any], depth: Int = 0) -> Self? {
         let id = integer(row["rpid"]); guard id > 0 else { return nil }
@@ -91,7 +93,7 @@ public struct Comment: Identifiable, Hashable, Sendable {
                     location: (row["reply_control"] as? [String: Any])?["location"] as? String ?? "", likes: integer(row["like"]), replyCount: integer(row["rcount"]),
                     children: depth == 0 ? unique((row["replies"] as? [[String: Any]] ?? []).compactMap { parse($0, depth: 1) }) : [],
                     mid: integer(member["mid"]), root: integer(row["root"]),
-                    liked: (row["action"] as? Int).flatMap { (0...2).contains($0) ? $0 == 1 : nil })
+                    liked: (row["action"] as? Int).flatMap { (0...2).contains($0) ? $0 == 1 : nil }, avatar: member["avatar"] as? String ?? "")
     }
     public static func unique(_ rows: [Self]) -> [Self] {
         var ids = Set<Int>(); return rows.filter { ids.insert($0.id).inserted }

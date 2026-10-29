@@ -6,6 +6,7 @@ struct CommentsSection: View {
     @Bindable var actions: CommentActionsModel
     let aid: Int
     let accountID: Int?
+    var openUser: ((Int) -> Void)? = nil
     let login: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -78,7 +79,7 @@ struct CommentsSection: View {
             } message: { proposal in Text("删除后无法恢复。\n\(proposal.comment.message)") }
     }
     private func row(_ comment: Comment, root: Int, compact: Bool = false) -> some View {
-        CommentBody(comment: actions.effective(comment), root: root, model: actions, login: login, compact: compact)
+        CommentBody(comment: actions.effective(comment), root: root, model: actions, login: login, openUser: openUser, compact: compact)
     }
 }
 
@@ -139,12 +140,14 @@ private struct CommentBody: View {
     let root: Int
     @Bindable var model: CommentActionsModel
     let login: () -> Void
+    var openUser: ((Int) -> Void)?
     var compact = false
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Image(systemName: "person.crop.circle.fill").foregroundStyle(accent.opacity(0.65))
-                Text(comment.name).fontWeight(.semibold)
+                if let openUser, comment.mid > 0 {
+                    Button { openUser(comment.mid) } label: { author }.buttonStyle(.plain).accessibilityLabel("查看用户 \(comment.name) 的主页")
+                } else { author }
                 Spacer()
             }.font(compact ? .caption : .callout)
             Text(comment.message).font(compact ? .callout : .body).lineSpacing(5).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
@@ -167,5 +170,8 @@ private struct CommentBody: View {
                 }
             }.font(.caption2).foregroundStyle(.secondary)
         }
+    }
+    private var author: some View {
+        HStack(spacing: 8) { AvatarView(url: comment.avatar, size: 24); Text(comment.name).fontWeight(.semibold) }
     }
 }

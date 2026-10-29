@@ -59,22 +59,29 @@ struct RootView: View {
     private var toolbar: some View {
         HStack(spacing: 16) {
             if store.showPlayer { Button { store.leavePlayer() } label: { Image(systemName: "chevron.left") }.buttonStyle(.plain).accessibilityLabel("返回列表") }
+            else if !store.profilePath.isEmpty { Button { store.backFromProfile() } label: { Image(systemName: "chevron.left") }.buttonStyle(.plain).accessibilityLabel("返回上一页") }
             HStack(spacing: 9) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("搜索视频，或粘贴 BV 号 / 视频链接", text: $store.query).textFieldStyle(.plain).focused($searching).onSubmit { store.search() }
+                TextField("搜索视频或用户，或粘贴 BV / 用户主页链接", text: $store.query).textFieldStyle(.plain).focused($searching).onSubmit { store.search() }
+                    .help("关键词搜索后可切换视频/用户；支持 UID:123 和 space.bilibili.com 用户主页链接")
                 if !store.query.isEmpty { Button { store.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }.buttonStyle(.plain).accessibilityLabel("清空搜索") }
                 Text("⌘ F").font(.system(size: 10, design: .monospaced)).foregroundStyle(.tertiary)
             }.padding(.horizontal, 13).frame(height: 38).background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 11)).frame(maxWidth: 540)
             Spacer(minLength: 10)
             if let account = store.account {
-                Menu { Button("检查登录状态") { Task { await store.checkAccount() } }; Button("退出登录", role: .destructive) { Task { await store.logout() } } } label: { Label(account.name, systemImage: "person.crop.circle.fill") }.menuStyle(.borderlessButton).fixedSize()
+                Menu { Button("我的主页") { store.openProfile(account.id) }; Button("检查登录状态") { Task { await store.checkAccount() } }; Button("退出登录", role: .destructive) { Task { await store.logout() } } } label: { Label(account.name, systemImage: "person.crop.circle.fill") }.menuStyle(.borderlessButton).fixedSize()
             } else {
                 Button { store.showLogin = true } label: { Label("扫码登录", systemImage: "person.crop.circle") }.buttonStyle(.glass)
             }
         }.padding(.horizontal, 30).frame(height: 76)
     }
     @ViewBuilder private var library: some View {
-        if store.activeSearch.isEmpty && [.favorites, .later].contains(store.destination) {
+        if let route = store.profilePath.last {
+            UserProfilePage(model: store.profiles.model(mid: route.mid), openVideo: store.open, openUser: store.openProfile) { store.showLogin = true }
+                .id("\(route.id)-\(store.account?.id ?? 0)")
+        } else if !store.activeSearch.isEmpty {
+            SearchPage(model: store.searches, openVideo: store.open, openUser: store.openProfile, accountID: store.account?.id) { store.showLogin = true }
+        } else if [.favorites, .later].contains(store.destination) {
             SavedLibraryView(store: store)
         } else { discovery }
     }
@@ -110,7 +117,7 @@ struct RootView: View {
         }
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 245), spacing: 22)], alignment: .leading, spacing: 28) {
             ForEach(Array(store.videos.enumerated()), id: \.element.id) { index, video in
-                VideoCard(video: video, index: index) { store.open(video.bvid) }
+                VideoCard(video: video, index: index, authorAction: video.authorID.map { mid in { store.openProfile(mid) } }) { store.open(video.bvid) }
             }
         }
         HStack {
@@ -128,7 +135,7 @@ struct RootView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 245), spacing: 22)], spacing: 28) {
                 ForEach(Array(store.history.enumerated()), id: \.element.id) { index, record in
                     VStack(alignment: .leading, spacing: 7) {
-                        VideoCard(video: record.video, index: index) { store.open(record.id) }
+                        VideoCard(video: record.video, index: index, authorAction: record.video.authorID.map { mid in { store.openProfile(mid) } }) { store.open(record.id) }
                         Text("上次看到 \(DisplayFormat.time(record.position))").font(.caption).foregroundStyle(accent)
                     }
                 }
@@ -141,6 +148,10 @@ struct VideoCard: View {
     let video: Video
     let index: Int
     let action: () -> Void
+    let authorAction: (() -> Void)?
+    init(video: Video, index: Int, authorAction: (() -> Void)? = nil, action: @escaping () -> Void) {
+        self.video = video; self.index = index; self.authorAction = authorAction; self.action = action
+    }
     private let colors: [Color] = [.teal,.indigo,.orange,.purple,.blue,.pink,.green,.brown]
     var body: some View {
         VStack(alignment: .leading, spacing: 11) {
@@ -148,22 +159,24 @@ struct VideoCard: View {
                 Thumbnail(url: video.cover, color: colors[index % colors.count],
                           symbol: ["mountain.2.fill","laptopcomputer","tram.fill","headphones","sparkles","fork.knife","camera.fill","desktopcomputer","water.waves"][index % 9],
                           playLabel: "播放 \(video.title)，\(video.author)", open: action)
-                Text(DisplayFormat.time(Double(video.duration))).font(.system(size: 11, weight: .medium, design: .monospaced))
+                Text(video.duration > 0 ? DisplayFormat.time(Double(video.duration)) : "时长未知").font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white).padding(.horizontal,7).padding(.vertical,4)
                     .background(.black.opacity(0.65), in: .rect(cornerRadius:5)).padding(9).allowsHitTesting(false)
             }.aspectRatio(16/9, contentMode: .fit).clipShape(.rect(cornerRadius: 13))
             Button(action: action) {
                 VStack(alignment: .leading, spacing: 11) {
                     Text(video.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary).lineLimit(2).frame(height: 38, alignment: .topLeading).multilineTextAlignment(.leading)
-                    HStack(spacing: 5) {
-                        Image(systemName: "person.crop.rectangle").font(.system(size: 10))
-                        Text(video.author).lineLimit(1)
-                        Spacer(minLength: 6)
-                        Image(systemName: "play").font(.system(size: 9))
-                        Text(DisplayFormat.count(video.views)).lineLimit(1)
-                    }.font(.system(size: 11)).foregroundStyle(.secondary)
                 }.contentShape(.rect)
             }.buttonStyle(.plain).accessibilityLabel("播放 \(video.title)，\(video.author)")
+            HStack(spacing: 5) {
+                if let authorAction {
+                    Button(action: authorAction) { Label(video.author, systemImage: "person.crop.rectangle").lineLimit(1) }
+                        .buttonStyle(.plain).accessibilityLabel("查看 UP 主 \(video.author) 的主页")
+                } else { Label(video.author, systemImage: "person.crop.rectangle").lineLimit(1) }
+                Spacer(minLength: 6)
+                Image(systemName: "play").font(.system(size: 9))
+                Text(DisplayFormat.count(video.views)).lineLimit(1)
+            }.font(.system(size: 11)).foregroundStyle(.secondary)
         }
     }
 }

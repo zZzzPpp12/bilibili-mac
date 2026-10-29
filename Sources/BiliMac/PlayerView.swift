@@ -39,7 +39,13 @@ struct PlayerPage: View {
                 if let detail = store.player.detail {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(detail.video.title).font(.system(size: 23, weight: .bold)).textSelection(.enabled)
-                        HStack(spacing: 18) { Label(detail.video.author, systemImage:"person.crop.circle"); Label("\(DisplayFormat.count(detail.video.views)) 次播放", systemImage:"play.rectangle"); Text(detail.video.bvid) }.font(.callout).foregroundStyle(.secondary)
+                        HStack(spacing: 18) {
+                            if let mid = detail.video.authorID {
+                                Button { store.openProfile(mid) } label: { Label(detail.video.author, systemImage: "person.crop.circle") }
+                                    .buttonStyle(.plain).accessibilityLabel("查看 UP 主 \(detail.video.author) 的主页")
+                            } else { Label(detail.video.author, systemImage: "person.crop.circle") }
+                            Label("\(DisplayFormat.count(detail.video.views)) 次播放", systemImage: "play.rectangle"); Text(detail.video.bvid)
+                        }.font(.callout).foregroundStyle(.secondary)
                     }
                     VideoInteractionsView(store: store, model: store.interactions.model(for: detail.video))
                         .id("\(detail.video.bvid)-\(store.account?.id ?? 0)")
@@ -59,7 +65,7 @@ struct PlayerPage: View {
                     if let error = store.player.danmakuError { Label(error,systemImage:"text.bubble").font(.caption).foregroundStyle(.secondary) }
                     if !detail.description.isEmpty { Text(detail.description).font(.callout).foregroundStyle(.secondary).lineSpacing(6).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading).padding(20).background(.quaternary.opacity(0.3),in:.rect(cornerRadius:14)) }
                     if !store.isDemo, detail.video.aid > 0 {
-                        CommentsSection(model: store.comments, actions: store.commentActions.model(for: detail.video), aid: detail.video.aid, accountID: store.account?.id) { store.showLogin = true }
+                        CommentsSection(model: store.comments, actions: store.commentActions.model(for: detail.video), aid: detail.video.aid, accountID: store.account?.id, openUser: store.openProfile) { store.showLogin = true }
                             .id("\(detail.video.bvid)-\(store.account?.id ?? 0)")
                     }
                 }

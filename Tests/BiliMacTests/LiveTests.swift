@@ -6,6 +6,30 @@ import BiliPlayback
 
 @Suite struct LiveTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["BILIMAC_LIVE_TEST"] == "1"))
+    func publicUserProfileAndAvatar() async throws {
+        let client = BilibiliClient()
+        let profile = try await client.userProfile(mid: 946974)
+        #expect(profile.user.mid == 946974); #expect(!profile.user.name.isEmpty)
+        let avatar = try await CoverImageLoader.shared.avatar(for: profile.user.avatar)
+        #expect(avatar.image.width > 0)
+        print("LIVE: real public UP profile and avatar checked; no account or follow writes; user search/uploads not asserted")
+    }
+    // Opt in separately: space/search requests can demand official verification
+    // even while public profile, cover and playback endpoints remain available.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["BILIMAC_LIVE_USERS"] == "1"))
+    func publicUserUploadsPagination() async throws {
+        let client = BilibiliClient()
+        let page = try await client.userVideos(mid: 946974, page: 1)
+        #expect(!page.items.isEmpty); #expect(page.total >= page.items.count)
+        #expect(page.items.allSatisfy { $0.authorID == 946974 && $0.duration >= 0 })
+        if page.hasMore {
+            let next = try await client.userVideos(mid: 946974, page: 2)
+            #expect(!next.items.isEmpty)
+            #expect(Set(next.items.map(\.bvid)).subtracting(page.items.map(\.bvid)).count > 0)
+        }
+        print("LIVE: two real public UP upload pages checked; no account or follow writes; user search not asserted")
+    }
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["BILIMAC_LIVE_TEST"] == "1"))
     func publicFeedCoversDecode() async throws {
         let client = BilibiliClient()
         for recommended in [false, true] {

@@ -28,7 +28,7 @@ public enum CoverImageError: Error, Equatable, Sendable {
 
 public struct CoverImageSource: Sendable {
     public let candidates: [URL]
-    public init(_ value: String) throws {
+    public init(_ value: String, avatar: Bool = false) throws {
         let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { throw CoverImageError.missingSource }
         guard var parts = URLComponents(string: value.hasPrefix("//") ? "https:" + value : value),
@@ -44,7 +44,7 @@ public struct CoverImageSource: Sendable {
         // Preserve signed queries and existing CDN transforms verbatim. Try the
         // unmodified source if our optional resize is unavailable or undecodable.
         if parts.query == nil, !parts.path.contains("@"),
-           let resized = URL(string: original.absoluteString + "@640w_360h_1c.webp") {
+           let resized = URL(string: original.absoluteString + (avatar ? "@160w_160h_1c.webp" : "@640w_360h_1c.webp")) {
             candidates = [resized, original]
         } else { candidates = [original] }
     }
@@ -77,7 +77,12 @@ public actor CoverImageLoader: CoverImageServing {
     }
 
     public func image(for source: String) async throws -> CoverImage {
-        let candidates = try CoverImageSource(source).candidates
+        try await load(CoverImageSource(source).candidates)
+    }
+    public func avatar(for source: String) async throws -> CoverImage {
+        try await load(CoverImageSource(source, avatar: true).candidates)
+    }
+    private func load(_ candidates: [URL]) async throws -> CoverImage {
         let key = candidates[0].absoluteString
         if let image = cache.object(forKey: key as NSString) { return image }
         if let task = pending[key] { return try await task.value }

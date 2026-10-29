@@ -11,7 +11,7 @@ public enum ClientError: LocalizedError {
         case .http(412): return "请求暂受限制，请稍后重试或登录。"
         case .http(let code): return "连接失败（HTTP \(code)），请重试。"
         case .server(-101, _): return "登录已失效，请重新扫码。"
-        case .server(let code, _) where [-352, -401, -403].contains(code): return "互动请求被限制（\(code)），请在哔哩哔哩官方页面完成验证后刷新状态。"
+        case .server(let code, _) where [-352, -401, -403].contains(code): return "请求被限制（\(code)），请在哔哩哔哩官方页面完成验证后刷新状态。"
         case .server(let code, let message): return "\(message)（\(code)）"
         case .noPlayableMedia: return "当前账号没有可播放的兼容媒体，请登录或选择其他视频。"
         case .invalidInput: return "请输入关键词、完整 BV 号或 B 站视频链接。"
@@ -32,22 +32,24 @@ public struct Video: Identifiable, Codable, Hashable, Sendable {
     public let title: String
     public let cover: String
     public let author: String
+    public let authorID: Int?
     public let duration: Int
     public let views: Int
-    public init(bvid: String, aid: Int = 0, title: String, cover: String = "", author: String, duration: Int, views: Int = 0) {
+    public init(bvid: String, aid: Int = 0, title: String, cover: String = "", author: String, duration: Int, views: Int = 0, authorID: Int? = nil) {
         self.bvid = bvid; self.aid = aid; self.title = title; self.cover = cover
-        self.author = author; self.duration = duration; self.views = views
+        self.author = author; self.duration = duration; self.views = views; self.authorID = authorID
     }
     public static func parse(_ row: [String: Any]) -> Self? {
         guard let bvid = row["bvid"] as? String, VideoInput.bvid(bvid) != nil else { return nil }
         let owner = row["owner"] as? [String: Any] ?? [:]
         let stat = row["stat"] as? [String: Any] ?? [:]
-        let duration = row["duration"] as? Int ?? (row["duration"] as? String ?? "0").split(separator: ":").reduce(0) { $0 * 60 + (Int($1) ?? 0) }
+        let duration = row["duration"] as? Int ?? (row["duration"] as? String ?? row["length"] as? String ?? "0").split(separator: ":").reduce(0) { $0 * 60 + (Int($1) ?? 0) }
         return Self(bvid: bvid, aid: integer(row["aid"]),
             title: (row["title"] as? String ?? "视频").replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression).replacingOccurrences(of: "&amp;", with: "&"),
             cover: row["pic"] as? String ?? row["cover"] as? String ?? "",
             author: owner["name"] as? String ?? row["author"] as? String ?? "未知作者",
-            duration: duration, views: integer(stat["view"] ?? row["play"]))
+            duration: duration, views: integer(stat["view"] ?? row["play"]),
+            authorID: integer(owner["mid"] ?? row["mid"]) > 0 ? integer(owner["mid"] ?? row["mid"]) : nil)
     }
     public static func unique(_ items: [Video]) -> [Video] {
         var seen = Set<String>(); return items.filter { seen.insert($0.id).inserted }

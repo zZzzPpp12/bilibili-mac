@@ -85,7 +85,7 @@ struct SavedLibraryView: View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 245), spacing: 22)], spacing: 28) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
                 VStack(alignment: .leading, spacing: 10) {
-                    if let video = item.video { VideoCard(video: video, index: index) { store.open(video.bvid) } }
+                    if let video = item.video { VideoCard(video: video, index: index, authorAction: video.authorID.map { mid in { store.openProfile(mid) } }) { store.open(video.bvid) } }
                     else {
                         VStack(alignment: .leading, spacing: 10) {
                             Thumbnail(url: item.cover, color: .gray, symbol: "play.slash").aspectRatio(16/9, contentMode: .fit).clipShape(.rect(cornerRadius: 13))

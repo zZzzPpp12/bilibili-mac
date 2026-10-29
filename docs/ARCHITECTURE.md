@@ -7,6 +7,8 @@ BiliMac（SwiftUI / AppKit）
   AppStore ── BilibiliClient（actor，BiliMacCore）
      │              ├─ WBI / URLSession / 业务响应验证
      │              └─ 官方 API / 二维码 / 弹幕 Protobuf
+     ├─ SearchModel → SearchServing（视频/用户分类、独立结果与分页）
+     ├─ UserProfileStore → UserProfileModel → UserServing（资料/投稿/关注）
      ├─ HistoryRepository / CredentialVault（独立存储空间）
      ├─ LibraryModel → LibraryServing（收藏/稍后再看）
      ├─ FavoriteEditorModel（勾选草稿、差集、写入确认）
@@ -61,7 +63,7 @@ BiliMac（SwiftUI / AppKit）
 
 0.2 已接入个人资料库与只读评论。`LibraryServing` / `CommentServing` 使用可发送的强类型值，允许测试注入可控延迟，不依赖真实凭据。收藏夹列表、夹内分页、稍后再看、评论主列表与楼中楼各自保留请求身份；账号变化清空私有内存快照。普通主评论分页不会作废正在加载的楼中楼，成功刷新则清空旧楼中楼。
 
-认证 POST 允许列表覆盖四条资料库端点、三条视频互动端点及三条评论写入端点，校验 mid 与当前 Cookie 一致并加入 CSRF；表单按 UTF-8 百分号编码，POST 不跟随重定向。状态模型阻止重复写入，传输/回执不确定则进入必须先读取核对的状态。收藏多选草稿不直接写服务器；新建收藏夹是单独的即时写入。账号 Cookie 不进入评论视图、截图夹具或测试日志。
+认证 POST 允许列表覆盖四条资料库端点、三条视频互动端点、三条评论写入端点及一条关注端点，校验 mid 与当前 Cookie 一致并加入 CSRF；表单按 UTF-8 百分号编码，POST 不跟随重定向。状态模型阻止重复写入，传输/回执不确定则进入必须先读取核对的状态。收藏多选草稿不直接写服务器；新建收藏夹是单独的即时写入。账号 Cookie 不进入评论视图、截图夹具或测试日志。
 
 0.3 的视频互动通过 `VideoInteractionServing` 隔离网络。一次状态读取在同一认证 generation 内组合稿件类型/作者、relation 和 nav 余额；视频互动在提交前向官方 finger/spi 获取必要浏览标识，只驻留当前会话内存。点赞使用明确的 like/unlike，投币选择 1–2 枚，三连只调用单次服务端端点，不在客户端拆成多次花费。
 
@@ -72,3 +74,13 @@ BiliMac（SwiftUI / AppKit）
 评论写入结果未知时，刷新仅 GET，仍保持限制；列表缺失可能来自分页或平台处理，不能作为重发依据。只有用户明确已到官方页面核对，才能手动解除限制，解除本身不发网络请求。凭据请求及 UI 模型均以各自的会话身份过滤迟到结果。
 
 后续优先用户主动扫码验收、真机画质/分 P/小窗回归，再增加后台弹幕排轨和评论图片预览。离线下载和 iOS 继续保留独立里程碑。
+
+## 0.5 用户链路
+
+`Users.swift` 将用户搜索、公开资料卡、WBI 投稿列表与关注写入映射为 `BiliUser` / `UserProfile` / `UserSearchPage` / `UserVideoPage`。缺失计数与关注关系为 optional，不从空值推断零或未关注；投稿兼容 `length` 时长字段并补齐当前主页作者 UID。`Video.authorID` 和 `Comment.avatar` 为旧调用提供默认值；旧历史缺少 authorID 仍可解码。
+
+`SearchModel` 按视频/用户保存独立页码与结果，请求代次在切分类、新词、刷新和关闭时失效。`UserProfileStore` 按当前账号/UID 保留模型；资料和投稿各自拥有请求标识、错误和刷新。排序、新账号、失效模型的旧响应被丢弃。关注请求只有一个在途操作，成功后切换关系，错误要求重新读取已知关系，不自动 POST。账号会话在网络层和视图层均有独立代次保护。
+
+`AppStore.profilePath` 保存主页来源和必要的播放器返回记录。正常浏览主页不替换 AVPlayer，迷你播放器继续可用；主页内打开另一视频后，返回上层作者来源可恢复原视频/CID/位置/暂停意图。用户明确关闭播放项后不会恢复。搜索结果模型不因展示主页而重置。
+
+用户搜索和投稿先向官方 finger/spi 获取浏览标识，再使用 nav 返回的 WBI key；不生成伪造标识，标识仅在当前会话内存。投稿采用对应官方空间 Referer。成功业务码里的 v_voucher / need_captcha 也视为验证错误，提供官方链接和登录/重试。头像复用封面共享下载/成功缓存，使用 160×160 缩略图并保留原图回退；图片不携带账号 Cookie。

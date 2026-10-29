@@ -41,6 +41,9 @@ public actor BilibiliClient {
         components.queryItems = values.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
         var request = URLRequest(url: components.url!)
         Self.mediaHeaders.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        if path == "/x/space/wbi/arc/search", let mid = query["mid"], (Int(mid) ?? 0) > 0 {
+            request.setValue("https://space.bilibili.com/\(mid)/upload/video", forHTTPHeaderField: "Referer")
+        }
         request.setValue(cookies.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "; "), forHTTPHeaderField: "Cookie")
         let (data, response) = try await session.data(for: request)
         try Task.checkCancellation()
@@ -51,7 +54,11 @@ public actor BilibiliClient {
         guard code == 0 || (path == "/x/web-interface/nav" && code == -101) else {
             throw ClientError.server(code, root["message"] as? String ?? "请求未成功")
         }
-        return (root["data"] as? [String: Any] ?? [:], response)
+        let result = root["data"] as? [String: Any] ?? [:]
+        if (result["v_voucher"] as? String)?.isEmpty == false || result["need_captcha"] as? Bool == true {
+            throw ClientError.server(-352, "需要完成官方验证")
+        }
+        return (result, response)
     }
     func requireAccount(_ mid: Int) throws {
         guard mid > 0, cookies["SESSDATA"] != nil, Int(cookies["DedeUserID"] ?? "") == mid else { throw ClientError.authenticationRequired }
@@ -62,7 +69,7 @@ public actor BilibiliClient {
         try requireAccount(mid)
         guard ["/x/v3/fav/resource/deal", "/x/v3/fav/folder/add", "/x/v2/history/toview/add", "/x/v2/history/toview/del",
                "/x/web-interface/archive/like", "/x/web-interface/coin/add", "/x/web-interface/archive/like/triple",
-               "/x/v2/reply/add", "/x/v2/reply/action", "/x/v2/reply/del"].contains(path),
+               "/x/v2/reply/add", "/x/v2/reply/action", "/x/v2/reply/del", "/x/relation/modify"].contains(path),
               let csrf = cookies["bili_jct"], !csrf.isEmpty else { throw ClientError.authenticationRequired }
         try Task.checkCancellation()
         let identity = generation
@@ -85,7 +92,9 @@ public actor BilibiliClient {
                   let root = try JSONSerialization.jsonObject(with: data) as? [String: Any], let code = root["code"] as? Int else { throw ClientError.writeUncertain }
             guard code == 0 else { throw ClientError.server(code, root["message"] as? String ?? "操作未成功") }
             let result = root["data"] as? [String: Any] ?? [:]
-            if result["need_captcha"] as? Bool == true { throw ClientError.server(-352, "需要完成官方验证") }
+            if result["need_captcha"] as? Bool == true || (result["v_voucher"] as? String)?.isEmpty == false {
+                throw ClientError.server(-352, "需要完成官方验证")
+            }
             return result
         } catch {
             guard identity == generation else { throw CancellationError() }
@@ -96,6 +105,9 @@ public actor BilibiliClient {
     func prepareInteraction(mid: Int) async throws {
         try requireAccount(mid)
         guard cookies["bili_jct"] != nil else { throw ClientError.authenticationRequired }
+        try await prepareBrowsingIdentifier()
+    }
+    func prepareBrowsingIdentifier() async throws {
         guard cookies["buvid3"] == nil else { return }
         let identity = generation
         let result = try await request("/x/frontend/finger/spi").data
