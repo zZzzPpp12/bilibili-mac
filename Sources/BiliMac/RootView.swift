@@ -141,51 +141,29 @@ struct VideoCard: View {
     let video: Video
     let index: Int
     let action: () -> Void
-    @State private var hovered = false
     private let colors: [Color] = [.teal,.indigo,.orange,.purple,.blue,.pink,.green,.brown]
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 11) {
-                ZStack(alignment: .bottomTrailing) {
-                    Thumbnail(url: video.cover, color: colors[index % colors.count], symbol: ["mountain.2.fill","laptopcomputer","tram.fill","headphones","sparkles","fork.knife","camera.fill","desktopcomputer","water.waves"][index % 9])
-                    Text(DisplayFormat.time(Double(video.duration))).font(.system(size: 11, weight: .medium, design: .monospaced)).foregroundStyle(.white).padding(.horizontal,7).padding(.vertical,4).background(.black.opacity(0.65), in: .rect(cornerRadius:5)).padding(9)
-                    if hovered { Image(systemName: "play.circle.fill").font(.system(size: 40)).symbolRenderingMode(.palette).foregroundStyle(.white,.black.opacity(0.3)).frame(maxWidth: .infinity, maxHeight: .infinity) }
-                }.aspectRatio(16/9, contentMode: .fit).clipShape(.rect(cornerRadius: 13))
-                Text(video.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary).lineLimit(2).frame(height: 38, alignment: .topLeading).multilineTextAlignment(.leading)
-                HStack(spacing: 5) {
-                    Image(systemName: "person.crop.rectangle").font(.system(size: 10))
-                    Text(video.author).lineLimit(1)
-                    Spacer(minLength: 6)
-                    Image(systemName: "play").font(.system(size: 9))
-                    Text(DisplayFormat.count(video.views)).lineLimit(1)
-                }.font(.system(size: 11)).foregroundStyle(.secondary)
-            }.contentShape(.rect)
-        }.buttonStyle(.plain).onHover { hovered = $0 }.accessibilityLabel("播放 \(video.title)，\(video.author)")
-    }
-}
-
-struct Thumbnail: View {
-    let url: String
-    var color: Color = .indigo
-    var symbol = "play.rectangle"
-    var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                LinearGradient(colors: [color.opacity(0.8),color.opacity(0.35),Color.black.opacity(0.5)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                Image(systemName: symbol).font(.system(size: 51, weight: .ultraLight)).foregroundStyle(.white.opacity(0.6))
-                if let parsed = safeURL {
-                    AsyncImage(url: parsed) { phase in
-                        if let image = phase.image { image.resizable().scaledToFill().frame(width:geometry.size.width,height:geometry.size.height).clipped() }
-                    }
-                }
-            }
+        VStack(alignment: .leading, spacing: 11) {
+            ZStack(alignment: .bottomTrailing) {
+                Thumbnail(url: video.cover, color: colors[index % colors.count],
+                          symbol: ["mountain.2.fill","laptopcomputer","tram.fill","headphones","sparkles","fork.knife","camera.fill","desktopcomputer","water.waves"][index % 9],
+                          playLabel: "播放 \(video.title)，\(video.author)", open: action)
+                Text(DisplayFormat.time(Double(video.duration))).font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white).padding(.horizontal,7).padding(.vertical,4)
+                    .background(.black.opacity(0.65), in: .rect(cornerRadius:5)).padding(9).allowsHitTesting(false)
+            }.aspectRatio(16/9, contentMode: .fit).clipShape(.rect(cornerRadius: 13))
+            Button(action: action) {
+                VStack(alignment: .leading, spacing: 11) {
+                    Text(video.title).font(.system(size: 14, weight: .semibold)).foregroundStyle(.primary).lineLimit(2).frame(height: 38, alignment: .topLeading).multilineTextAlignment(.leading)
+                    HStack(spacing: 5) {
+                        Image(systemName: "person.crop.rectangle").font(.system(size: 10))
+                        Text(video.author).lineLimit(1)
+                        Spacer(minLength: 6)
+                        Image(systemName: "play").font(.system(size: 9))
+                        Text(DisplayFormat.count(video.views)).lineLimit(1)
+                    }.font(.system(size: 11)).foregroundStyle(.secondary)
+                }.contentShape(.rect)
+            }.buttonStyle(.plain).accessibilityLabel("播放 \(video.title)，\(video.author)")
         }
-    }
-    private var safeURL: URL? {
-        guard var components = URLComponents(string: url.hasPrefix("//") ? "https:" + url : url), let host = components.host?.lowercased(),
-              ["hdslb.com","biliimg.com"].contains(where: { host == $0 || host.hasSuffix("." + $0) }), ["http","https"].contains(components.scheme ?? "") else { return nil }
-        components.scheme = "https"
-        if let source = components.url { return URL(string: source.absoluteString + (source.query == nil ? "@640w_360h_1c.webp" : "")) }
-        return nil
     }
 }

@@ -6,6 +6,19 @@ import BiliPlayback
 
 @Suite struct LiveTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["BILIMAC_LIVE_TEST"] == "1"))
+    func publicFeedCoversDecode() async throws {
+        let client = BilibiliClient()
+        for recommended in [false, true] {
+            let feed = try await client.feed(recommended: recommended, page: 1)
+            #expect(!feed.isEmpty)
+            for video in feed.prefix(3) {
+                let image = try await CoverImageLoader.shared.image(for: video.cover)
+                #expect(image.image.width > 0); #expect(image.image.height > 0)
+            }
+        }
+        print("LIVE: six real popular/recommended covers downloaded and decoded with the production loader; no credentials or writes")
+    }
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["BILIMAC_LIVE_TEST"] == "1"))
     func publicCommentsAndThread() async throws {
         let client = BilibiliClient()
         let feed = try await client.feed(recommended: false, page: 1)
