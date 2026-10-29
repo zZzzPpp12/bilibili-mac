@@ -41,6 +41,7 @@ struct PlayerPage: View {
                         Text(detail.video.title).font(.system(size: 23, weight: .bold)).textSelection(.enabled)
                         HStack(spacing: 18) { Label(detail.video.author, systemImage:"person.crop.circle"); Label("\(DisplayFormat.count(detail.video.views)) 次播放", systemImage:"play.rectangle"); Text(detail.video.bvid) }.font(.callout).foregroundStyle(.secondary)
                     }
+                    VideoLibraryActions(store: store, video: detail.video).id(detail.video.bvid)
                     if detail.pages.count > 1 {
                         VStack(alignment:.leading, spacing:12) {
                             Text("视频分 P").font(.headline)
@@ -55,6 +56,9 @@ struct PlayerPage: View {
                     }
                     if let error = store.player.danmakuError { Label(error,systemImage:"text.bubble").font(.caption).foregroundStyle(.secondary) }
                     if !detail.description.isEmpty { Text(detail.description).font(.callout).foregroundStyle(.secondary).lineSpacing(6).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading).padding(20).background(.quaternary.opacity(0.3),in:.rect(cornerRadius:14)) }
+                    if !store.isDemo, detail.video.aid > 0 {
+                        CommentsSection(model: store.comments, aid: detail.video.aid, accountID: store.account?.id)
+                    }
                 }
             }.padding(30)
         }

@@ -73,7 +73,12 @@ struct RootView: View {
             }
         }.padding(.horizontal, 30).frame(height: 76)
     }
-    private var library: some View {
+    @ViewBuilder private var library: some View {
+        if store.activeSearch.isEmpty && [.favorites, .later].contains(store.destination) {
+            SavedLibraryView(store: store)
+        } else { discovery }
+    }
+    private var discovery: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 25) {
                 HStack(alignment: .center) {

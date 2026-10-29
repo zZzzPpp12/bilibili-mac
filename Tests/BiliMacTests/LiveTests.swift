@@ -6,6 +6,20 @@ import BiliMacCore
 
 @Suite struct LiveTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["BILIMAC_LIVE_TEST"] == "1"))
+    func publicCommentsAndThread() async throws {
+        let client = BilibiliClient()
+        let feed = try await client.feed(recommended: false, page: 1)
+        let video = try #require(feed.first)
+        let page = try await client.comments(aid: video.aid, sort: .hot, offset: nil)
+        #expect(page.total >= 0)
+        if let root = page.items.first(where: { $0.replyCount > 0 }) {
+            _ = try await client.commentThread(aid: video.aid, root: root.id, page: 1)
+        }
+        if let offset = page.next { _ = try await client.comments(aid: video.aid, sort: .hot, offset: offset) }
+        _ = try await client.comments(aid: video.aid, sort: .latest, offset: nil)
+        print("LIVE: public comment sorting, cursor and thread reads checked; no credentials or writes")
+    }
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["BILIMAC_LIVE_TEST"] == "1"))
     func publicEndpointsAndQR() async throws {
         let client = BilibiliClient()
         let feed = try await client.feed(recommended:false,page:1)

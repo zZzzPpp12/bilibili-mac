@@ -27,7 +27,7 @@ public actor BilibiliClient {
         cookies = values.filter { allowed.contains($0.key) && !$0.value.isEmpty && $0.value.count < 8192 && !$0.value.contains(where: { $0 == ";" || $0.isNewline }) }
         generation = UUID(); key = nil
     }
-    private func request(_ path: String, query: [String: String] = [:], signed: Bool = false, passport: Bool = false) async throws -> (data: [String: Any], response: HTTPURLResponse) {
+    func request(_ path: String, query: [String: String] = [:], signed: Bool = false, passport: Bool = false) async throws -> (data: [String: Any], response: HTTPURLResponse) {
         let identity = generation
         var values = query
         if signed {
@@ -51,6 +51,41 @@ public actor BilibiliClient {
             throw ClientError.server(code, root["message"] as? String ?? "请求未成功")
         }
         return (root["data"] as? [String: Any] ?? [:], response)
+    }
+    func requireAccount(_ mid: Int) throws {
+        guard mid > 0, cookies["SESSDATA"] != nil, Int(cookies["DedeUserID"] ?? "") == mid else { throw ClientError.authenticationRequired }
+    }
+    // Only the four explicitly supported library writes can carry credentials.
+    // Transport failures are ambiguous: a server may already have applied the write.
+    func postLibrary(_ path: String, values: [String: String], mid: Int) async throws -> [String: Any] {
+        try requireAccount(mid)
+        guard ["/x/v3/fav/resource/deal", "/x/v3/fav/folder/add", "/x/v2/history/toview/add", "/x/v2/history/toview/del"].contains(path),
+              let csrf = cookies["bili_jct"], !csrf.isEmpty else { throw ClientError.authenticationRequired }
+        try Task.checkCancellation()
+        let identity = generation
+        var request = URLRequest(url: URL(string: "https://api.bilibili.com" + path)!)
+        request.httpMethod = "POST"
+        var form = values; form["csrf"] = csrf
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        request.httpBody = Data(form.sorted { $0.key < $1.key }.map {
+            "\($0.key.addingPercentEncoding(withAllowedCharacters: allowed)!)=\($0.value.addingPercentEncoding(withAllowedCharacters: allowed)!)"
+        }.joined(separator: "&").utf8)
+        Self.mediaHeaders.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue("https://www.bilibili.com", forHTTPHeaderField: "Origin")
+        request.setValue(cookies.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "; "), forHTTPHeaderField: "Cookie")
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard identity == generation else { throw CancellationError() }
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  let root = try JSONSerialization.jsonObject(with: data) as? [String: Any], let code = root["code"] as? Int else { throw ClientError.writeUncertain }
+            guard code == 0 else { throw ClientError.server(code, root["message"] as? String ?? "操作未成功") }
+            return root["data"] as? [String: Any] ?? [:]
+        } catch {
+            guard identity == generation else { throw CancellationError() }
+            if case ClientError.server = error { throw error }
+            throw ClientError.writeUncertain
+        }
     }
     public func account() async throws -> Account? {
         let data = try await request("/x/web-interface/nav").data

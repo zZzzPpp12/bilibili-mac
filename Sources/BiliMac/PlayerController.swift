@@ -97,7 +97,9 @@ import BiliMacCore
         // A finite deadline also covers a ready item that never obtains playable media.
         try await Task.sleep(for: .seconds(30))
         guard identity == generation else { return }
-        if loading || (playing && player.currentTime().seconds <= position + 0.01 && player.timeControlStatus != .playing) {
+        // Native controls can pause immediately after ready. A paused item is
+        // user intent, whereas waiting with no media progress is a stalled start.
+        if loading || (player.timeControlStatus == .waitingToPlayAtSpecifiedRate && player.currentTime().seconds <= position + 0.01) {
             fail(ClientError.server(0,"媒体未能开始播放，请重试或切换画质"), identity: identity)
         }
     }

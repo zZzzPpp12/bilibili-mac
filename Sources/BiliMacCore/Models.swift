@@ -3,6 +3,7 @@ import BiliModels
 
 public enum ClientError: LocalizedError {
     case invalidResponse, http(Int), server(Int, String), noPlayableMedia, invalidInput
+    case authenticationRequired, writeUncertain, paginationStalled, invalidFolderName
     public var errorDescription: String? {
         switch self {
         case .invalidResponse: return "服务返回的数据不完整，请稍后重试。"
@@ -12,6 +13,10 @@ public enum ClientError: LocalizedError {
         case .server(let code, let message): return "\(message)（\(code)）"
         case .noPlayableMedia: return "当前账号没有可播放的兼容媒体，请登录或选择其他视频。"
         case .invalidInput: return "请输入关键词、完整 BV 号或 B 站视频链接。"
+        case .authenticationRequired: return "请先扫码登录，再操作账号资料库。"
+        case .writeUncertain: return "请求结果尚未确认，请先刷新状态核对，再决定是否继续操作。"
+        case .paginationStalled: return "本页没有返回新的内容，请重试。"
+        case .invalidFolderName: return "收藏夹名称需要 1–20 个字。"
         }
     }
 }
