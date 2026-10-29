@@ -94,3 +94,11 @@ MediaTrack / ByteSpan 是独立类型；NativePlaybackBridge 通过 MediaReading
 LocalMediaService 使用 Network.framework，仅监听 127.0.0.1，随机会话路径与精确 Host；限制头部 16 KiB、头部等待 5 秒、总连接 12、连接时限 35 秒。关闭会话取消其连接、下载和等待配额；两条媒体交付通道持有配额到发送完成，最多约 32 MiB 分片数据驻留（另有数据拷贝、索引及系统播放器开销，不能当作进程 RSS 上限）。HTTPMediaReader 的 URLSession 不使用 Cookie/凭据/缓存，只允许 User-Agent 与 Referer，重定向不跟随；16 MiB 是每次读取硬上限。
 
 PlayerController 注入 PlaybackPreparing，继续复用同一个 AVPlayer。分 P、画质和普通页面切换保留已有播放意图/进度机制。自研桥失败直接提示，不调用旧实现。回环交付是当前 macOS 开发版取舍，并不满足苹果关于避免本地服务器的交付建议；AirPlay、上架、公证和跨平台兼容仍需独立评估。
+
+## 0.6.1 播放画面与评论区小窗
+
+PlayerSurface 使用限定在画面区域的 AppKit 单击手势切换播放意图，原生控制条、滑块和菜单保持自己的事件处理。AVKit 内部子视图会消费滚轮；仅在当前窗口、当前可见画面区域使用本地滚轮事件监视器转交父级滚动容器，不监听键盘或应用外事件。离开窗口、SwiftUI 拆卸或释放时移除监视器。
+
+PlayerPage 在固定尺寸的视频占位上监听滚动可见性，低于 20% 时切换为内容区右下角浮动展示；滚回或点击“回到视频”恢复内嵌展示。ScrollPlaybackPresentation 仅管理可见性与本次收起状态，AVPlayer、当前项和媒体会话继续由 PlayerController 持有。位置切换不调用 prepare/open，不重建音视频资源。PlayerController 延迟创建并持有唯一 PlayerSurface，展示槽 PlayerContainer 通过所有权令牌迁移该视图；旧槽延迟拆卸不能解绑新槽，避免暂停时重建视频图层导致黑屏。关闭自动小窗调用 pause，连同尚在加载中的播放意图一起暂停；同一轮评论浏览不自动弹回，视频重新可见后解除收起状态。
+
+自动小窗属于 PlayerPage；离页后仍由 RootView 使用原 MiniPlayer，因此不会叠加两个小窗。列表小窗的关闭仍调用 stop，与评论区的暂停收起保持独立语义。

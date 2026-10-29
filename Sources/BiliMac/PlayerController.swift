@@ -5,6 +5,11 @@ import BiliMacCore
 
 @MainActor @Observable final class PlayerController {
     let player = AVPlayer()
+    @ObservationIgnored lazy var surface: PlayerSurface = {
+        let view = PlayerSurface()
+        view.controller = self; view.player = player
+        return view
+    }()
     var detail: VideoDetail?
     var requestedBVID: String?
     var manifest: BiliMacCore.PlaybackManifest?
@@ -57,6 +62,7 @@ import BiliMacCore
     }
     func open(_ bvid: String, client: BilibiliClient, record: WatchRecord?, playing: Bool? = nil) {
         stop(); let identity = generation; loading = true; requestedBVID = bvid
+        pending = (record?.position ?? 0, playing ?? AppSettings.defaults.bool(forKey: "autoPlay"))
         positions = record?.positions ?? [:]
         task = Task {
             do {
@@ -66,7 +72,7 @@ import BiliMacCore
                 let page = detail.pages.first { $0.id == record?.cid } ?? detail.pages[0]
                 cid = page.id
                 let position = WatchRecord.resumePosition(record?.position ?? 0, duration: Double(page.duration))
-                try await prepare(client: client, quality: nil, position: position, playing: playing ?? AppSettings.defaults.bool(forKey: "autoPlay"), identity: identity)
+                try await prepare(client: client, quality: nil, position: position, playing: pending?.playing ?? false, identity: identity)
             } catch { fail(error, identity: identity) }
         }
     }
@@ -162,6 +168,10 @@ import BiliMacCore
         if pending != nil { pending?.playing.toggle(); return }
         if player.rate > 0 { player.pause(); saveProgress() }
         else { if duration > 0, position >= duration - 0.25 { seek(0) }; player.playImmediately(atRate: rate) }
+    }
+    func pause() {
+        if pending != nil { pending?.playing = false }
+        player.pause(); playing = false; saveProgress()
     }
     func seek(_ seconds: Double) { guard seconds.isFinite else { return }; player.seek(to: CMTime(seconds: min(max(0,seconds), max(0,duration)), preferredTimescale: 600)) }
     func setRate(_ value: Float) { rate = value; AppSettings.defaults.set(Double(value), forKey: "playbackRate"); if player.rate > 0 { player.rate = value } }

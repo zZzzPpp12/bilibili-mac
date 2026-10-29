@@ -31,7 +31,13 @@ import BiliMacCore
             if let oldQuality { AppSettings.defaults.set(oldQuality,forKey:"quality") } else { AppSettings.defaults.removeObject(forKey:"quality") }
         }
         let video = Video(bvid:bvid,title:"测试",author:"测试 UP",duration:8)
-        controller.open(bvid,client:api,record:.init(video:video,cid:99,position:3.2),playing:false)
+        controller.open(bvid,client:api,record:.init(video:video,cid:99,position:3.2),playing:true)
+        controller.pause() // Also covers a close before detail/API preparation finishes.
+        #expect(!controller.intendedPlaying)
+        controller.toggle()
+        #expect(controller.intendedPlaying)
+        controller.pause() // The final intent must survive later API and bridge preparation.
+        #expect(!controller.intendedPlaying)
         for _ in 0..<120 { if !controller.loading { break }; try await Task.sleep(for:.milliseconds(100)) }
         try #require(controller.error == nil); #expect(!controller.loading)
         #expect(abs(controller.player.currentTime().seconds-3.2) < 0.15)
@@ -40,6 +46,12 @@ import BiliMacCore
         for _ in 0..<120 { if !controller.loading && controller.player.currentItem?.status == .readyToPlay { break }; try await Task.sleep(for:.milliseconds(100)) }
         #expect(controller.error == nil)
         #expect(abs(controller.player.currentTime().seconds-3.2) < 0.15)
+        #expect(!controller.intendedPlaying); #expect(controller.player.rate == 0)
+        let item = try #require(controller.player.currentItem)
+        controller.toggle()
+        try await Task.sleep(for:.milliseconds(150))
+        controller.pause()
+        #expect(controller.player.currentItem === item)
         #expect(!controller.intendedPlaying); #expect(controller.player.rate == 0)
     }
 }
