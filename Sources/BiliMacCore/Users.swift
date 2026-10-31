@@ -50,7 +50,14 @@ public enum UserVideoOrder: String, CaseIterable, Identifiable, Sendable {
 }
 public protocol SearchServing: Sendable {
     func search(_ term: String, page: Int) async throws -> [Video]
+    func searchVideos(_ term: String, page: Int, options: VideoSearchOptions) async throws -> VideoSearchPage
     func searchUsers(_ term: String, page: Int) async throws -> UserSearchPage
+}
+extension SearchServing {
+    public func searchVideos(_ term: String, page: Int, options: VideoSearchOptions) async throws -> VideoSearchPage {
+        let rows = try await search(term, page: page)
+        return .init(items: rows, total: nil, hasMore: !rows.isEmpty)
+    }
 }
 public protocol UserServing: Sendable {
     func userProfile(mid: Int) async throws -> UserProfile

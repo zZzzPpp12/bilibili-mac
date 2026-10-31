@@ -32,12 +32,13 @@ struct SearchPage: View {
         return parts.url
     }
     var body: some View {
-        ScrollView {
+        let key = "\(model.term)-\(model.kind.rawValue)"
+        RetainedScrollView(offset: Binding(get: { model.scrollOffset }, set: { if key == "\(model.term)-\(model.kind.rawValue)" { model.scrollOffset = $0 } })) {
             VStack(alignment: .leading, spacing: 24) {
                 HStack {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("搜索结果").font(.system(size: 31, weight: .bold))
-                        Text("关于「\(model.term)」\(result.total.map { " · \(DisplayFormat.count($0)) 位用户" } ?? "")").font(.callout).foregroundStyle(.secondary)
+                        Text("关于「\(model.term)」\(result.total.map { " · \(DisplayFormat.count($0)) \(model.kind == .users ? "位用户" : "条视频")" } ?? "")").font(.callout).foregroundStyle(.secondary)
                     }
                     Spacer()
                     Button { model.load() } label: { Label("刷新", systemImage: "arrow.clockwise") }.buttonStyle(.glass).disabled(result.loading)
@@ -45,6 +46,7 @@ struct SearchPage: View {
                 Picker("搜索分类", selection: Binding(get: { model.kind }, set: { model.select($0) })) {
                     ForEach(SearchKind.allCases) { Text($0.rawValue).tag($0) }
                 }.pickerStyle(.segmented).frame(width: 220)
+                if model.kind == .videos { SearchFiltersView(model: model) }
                 if let error = result.error {
                     InlineError(message: error) { model.retry() }
                     if let officialURL { Link("在哔哩哔哩查看／处理验证", destination: officialURL).font(.callout) }
@@ -53,14 +55,14 @@ struct SearchPage: View {
                 if model.kind == .videos {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 245), spacing: 22)], spacing: 28) {
                         ForEach(Array(result.videos.enumerated()), id: \.element.id) { index, video in
-                            VideoCard(video: video, index: index, authorAction: video.authorID.map { mid in { openUser(mid) } }) { openVideo(video.bvid) }
+                            VideoCard(video: video, index: index, authorAction: video.authorID.map { mid in { openUser(mid) } }) { openVideo(video.bvid) }.id(video.id)
                         }
                     }
                 } else {
                     LazyVStack(spacing: 14) {
                         ForEach(result.users) { user in
                             Button { openUser(user.mid) } label: { UserResultRow(user: user) }.buttonStyle(.plain)
-                                .accessibilityLabel("查看用户 \(user.name) 的主页，UID \(user.mid)")
+                                .accessibilityLabel("查看用户 \(user.name) 的主页，UID \(user.mid)").id("user-\(user.mid)")
                         }
                     }
                 }
@@ -68,9 +70,9 @@ struct SearchPage: View {
                 else if result.loaded && (model.kind == .videos ? result.videos.isEmpty : result.users.isEmpty) && result.error == nil {
                     ContentUnavailableView("没有找到相关\(model.kind.rawValue)", systemImage: model.kind == .users ? "person.crop.circle.badge.questionmark" : "magnifyingglass", description: Text("试试其他关键词，或切换搜索分类。"))
                 } else if result.hasMore { Button("加载更多\(model.kind.rawValue)") { model.load(more: true) }.buttonStyle(.glass).frame(maxWidth: .infinity).disabled(result.loading) }
-                else if result.loaded && result.error == nil { Text("已显示全部结果").font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity) }
+                else if result.loaded && result.error == nil { Text(result.limited ? "已保留 600 条结果，请缩小筛选范围继续查找" : "已显示全部结果").font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity) }
             }.padding(30)
-        }
+        }.id(result.revision).id(key).id(model.kind == .videos ? model.options : .init())
     }
 }
 

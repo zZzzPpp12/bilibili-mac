@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main struct BiliMacApp: App {
-    @State private var store = AppStore()
+    @State private var store = AppStore(searchHistoryDefaults: AppSettings.defaults)
     init() {
         // Exercise the real .app bundle and AppStore initialization in CI without
         // creating a window, accessing credentials or contacting the network.

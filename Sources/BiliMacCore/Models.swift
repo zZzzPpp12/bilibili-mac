@@ -35,9 +35,12 @@ public struct Video: Identifiable, Codable, Hashable, Sendable {
     public let authorID: Int?
     public let duration: Int
     public let views: Int
-    public init(bvid: String, aid: Int = 0, title: String, cover: String = "", author: String, duration: Int, views: Int = 0, authorID: Int? = nil) {
+    public let publishedAt: Date?
+    public let categoryID: Int?
+    public init(bvid: String, aid: Int = 0, title: String, cover: String = "", author: String, duration: Int, views: Int = 0, authorID: Int? = nil, publishedAt: Date? = nil, categoryID: Int? = nil) {
         self.bvid = bvid; self.aid = aid; self.title = title; self.cover = cover
         self.author = author; self.duration = duration; self.views = views; self.authorID = authorID
+        self.publishedAt = publishedAt; self.categoryID = categoryID
     }
     public static func parse(_ row: [String: Any]) -> Self? {
         guard let bvid = row["bvid"] as? String, VideoInput.bvid(bvid) != nil else { return nil }
@@ -49,7 +52,9 @@ public struct Video: Identifiable, Codable, Hashable, Sendable {
             cover: row["pic"] as? String ?? row["cover"] as? String ?? "",
             author: owner["name"] as? String ?? row["author"] as? String ?? "未知作者",
             duration: duration, views: integer(stat["view"] ?? row["play"]),
-            authorID: integer(owner["mid"] ?? row["mid"]) > 0 ? integer(owner["mid"] ?? row["mid"]) : nil)
+            authorID: integer(owner["mid"] ?? row["mid"]) > 0 ? integer(owner["mid"] ?? row["mid"]) : nil,
+            publishedAt: integer(row["pubdate"] ?? row["ctime"]) > 0 ? Date(timeIntervalSince1970: Double(integer(row["pubdate"] ?? row["ctime"]))) : nil,
+            categoryID: integer(row["tid"] ?? row["typeid"]) > 0 ? integer(row["tid"] ?? row["typeid"]) : nil)
     }
     public static func unique(_ items: [Video]) -> [Video] {
         var seen = Set<String>(); return items.filter { seen.insert($0.id).inserted }

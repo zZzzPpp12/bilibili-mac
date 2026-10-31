@@ -14,10 +14,10 @@ enum AppSettings {
     static func register() { defaults.register(defaults: ["appearance":"system", "autoPlay":true, "rememberPosition":true, "danmakuEnabled":true, "danmakuOpacity":0.8, "playbackRate":1.0]) }
 }
 enum Destination: String, CaseIterable, Identifiable {
-    case recommended = "推荐", popular = "热门", favorites = "我的收藏", later = "稍后再看", history = "观看记录"
+    case recommended = "推荐", popular = "热门", regions = "分区发现", favorites = "我的收藏", later = "稍后再看", history = "观看记录"
     var id: Self { self }
-    var icon: String { switch self { case .recommended: "sparkles"; case .popular: "flame"; case .favorites: "star"; case .later: "clock.badge.checkmark"; case .history: "clock.arrow.circlepath" } }
-    var subtitle: String { switch self { case .recommended: "发现值得停留的好内容"; case .popular: "看看大家此刻都在看什么"; case .favorites: "把喜欢的内容，放进自己的收藏夹"; case .later: "留给有空的自己"; case .history: "每一次好奇，都有迹可循" } }
+    var icon: String { switch self { case .recommended: "sparkles"; case .popular: "flame"; case .regions: "square.grid.2x2"; case .favorites: "star"; case .later: "clock.badge.checkmark"; case .history: "clock.arrow.circlepath" } }
+    var subtitle: String { switch self { case .recommended: "发现值得停留的好内容"; case .popular: "看看大家此刻都在看什么"; case .regions: "按兴趣探索 B 站分区榜单"; case .favorites: "把喜欢的内容，放进自己的收藏夹"; case .later: "留给有空的自己"; case .history: "每一次好奇，都有迹可循" } }
 }
 @MainActor @Observable final class AppStore {
     let client: BilibiliClient
@@ -25,6 +25,8 @@ enum Destination: String, CaseIterable, Identifiable {
     let comments: CommentsModel
     let commentActions: CommentActionsStore
     let searches: SearchModel
+    let searchAssistance: SearchAssistanceModel
+    let discovery: DiscoveryModel
     let profiles: UserProfileStore
     let interactions: InteractionStore
     let player = PlayerController()
@@ -39,33 +41,31 @@ enum Destination: String, CaseIterable, Identifiable {
         let returnPlaying: Bool
     }
     var profilePath: [ProfileRoute] = []
-    var videos: [Video] = []
     var history: [WatchRecord] = []
     var account: Account? {
         didSet {
             if oldValue?.id != account?.id {
+                searchAssistance.setAccount(account?.id); searches.resetAccount(); discovery.reset()
                 library.setAccount(account?.id); comments.reset(); interactions.setAccount(account?.id); commentActions.setAccount(account?.id); profiles.setAccount(account?.id)
+                if [.recommended, .popular, .regions].contains(destination), activeSearch.isEmpty { reload() }
             }
         }
     }
-    var loading = false
-    var hasMore = true
-    var error: String?
+    var loading: Bool { discovery.current.loading }
     var accountMessage: String?
     var showPlayer = false
     var showLogin = false
     var searchFocus = 0
-    private var page = 1
-    private var feedTask: Task<Void, Never>?
-    private var feedGeneration = UUID()
     private var accountGeneration = UUID()
-    private var snapshots: [String: ([Video], Int, Bool)] = [:]
     private var historyRepository: HistoryRepository { HistoryRepository(file: isDemo ? FileManager.default.temporaryDirectory.appendingPathComponent("BiliMac-demo-history.json") : nil) }
     var title: String { activeSearch.isEmpty ? destination.rawValue : "搜索结果" }
     var subtitle: String { activeSearch.isEmpty ? destination.subtitle : "关于「\(activeSearch)」的内容" }
-    init(client: BilibiliClient = BilibiliClient()) {
+    init(client: BilibiliClient = BilibiliClient(), searchHistoryDefaults: UserDefaults? = nil) {
         self.client = client
         searches = SearchModel(api: ProcessInfo.processInfo.arguments.contains("--demo") ? DemoSearchService() : client)
+        searchAssistance = SearchAssistanceModel(api: ProcessInfo.processInfo.arguments.contains("--demo") ? DemoSuggestService() : client,
+                                                defaults: ProcessInfo.processInfo.arguments.contains("--demo") ? nil : searchHistoryDefaults)
+        discovery = DiscoveryModel(api: ProcessInfo.processInfo.arguments.contains("--demo") ? DemoDiscoveryService() : client)
         profiles = UserProfileStore(api: client)
         let library = LibraryModel(api: client); self.library = library; comments = CommentsModel(api: client)
         commentActions = CommentActionsStore(api: client)
@@ -82,7 +82,7 @@ enum Destination: String, CaseIterable, Identifiable {
     }
     func start() async {
         history = await Task.detached { [historyRepository] in historyRepository.load() }.value
-        if isDemo { videos = DemoData.videos; hasMore = false; return }
+        if isDemo { discovery.load(); return }
         let identity = accountGeneration
         let cookies = await Task.detached { CredentialVault.load() }.value
         guard identity == accountGeneration else { return }
@@ -92,20 +92,20 @@ enum Destination: String, CaseIterable, Identifiable {
         catch { if identity == accountGeneration, !cookies.isEmpty { accountMessage = "账号暂未验证，可重新检查；本机登录已保留。" } }
     }
     func select(_ next: Destination) {
-        if activeSearch.isEmpty && !videos.isEmpty { snapshots[destination.rawValue] = (videos, page, hasMore) }
-        feedTask?.cancel(); feedGeneration = UUID(); loading = false
-        player.saveProgress(); showPlayer = false; destination = next; searches.close(); profilePath = []; query = ""; error = nil
-        guard next == .recommended || next == .popular else { return }
-        if isDemo { videos = DemoData.videos; hasMore = false; return }
-        if let snapshot = snapshots[next.rawValue] { (videos, page, hasMore) = snapshot }
-        else { videos = []; reload() }
+        discovery.suspend(); searchAssistance.dismiss()
+        player.saveProgress(); showPlayer = false; destination = next; searches.close(); profilePath = []; query = ""
+        guard [.recommended, .popular, .regions].contains(next) else { return }
+        discovery.setHistory(history)
+        discovery.select(next == .recommended ? .recommended : next == .popular ? .popular : .regions)
     }
     func search() {
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty else { return }
+        guard term.utf16.count <= 100 else { accountMessage = "搜索词最多 100 个字符。"; return }
+        searchAssistance.dismiss()
         if let bvid = VideoInput.bvid(term) { open(bvid); return }
         if let mid = UserInput.mid(term) { openProfile(mid); return }
-        feedTask?.cancel(); feedGeneration = UUID(); loading = false
+        discovery.suspend(); searchAssistance.record(term)
         player.saveProgress(); showPlayer = false; profilePath = []; searches.submit(term)
     }
     func reload() {
@@ -121,25 +121,9 @@ enum Destination: String, CaseIterable, Identifiable {
             }
             if destination == .later { if !isDemo { Task { await library.loadLater() } }; return }
         }
-        fetch(more: false)
+        discovery.setHistory(history); discovery.load()
     }
-    func loadMore() { guard !loading, hasMore else { return }; fetch(more: true) }
-    private func fetch(more: Bool) {
-        feedTask?.cancel(); feedGeneration = UUID(); let identity = feedGeneration
-        if isDemo { videos = activeSearch.isEmpty ? DemoData.videos : DemoData.videos.filter { $0.title.localizedCaseInsensitiveContains(activeSearch) }; loading = false; hasMore = false; return }
-        let next = more ? page + 1 : 1, recommended = destination == .recommended
-        loading = true; error = nil
-        feedTask = Task {
-            do {
-                let rows = try await client.feed(recommended: recommended, page: next)
-                guard identity == feedGeneration, !Task.isCancelled else { return }
-                videos = Video.unique((more ? videos : []) + rows); page = next; hasMore = !rows.isEmpty; loading = false
-            } catch {
-                guard identity == feedGeneration, !Task.isCancelled else { return }
-                self.error = error.localizedDescription; loading = false
-            }
-        }
-    }
+    func loadMore() { discovery.load(more: true) }
     func open(_ bvid: String) {
         comments.reset()
         player.saveProgress(); showPlayer = true
@@ -180,9 +164,9 @@ enum Destination: String, CaseIterable, Identifiable {
     func persistHistory() {
         do { try historyRepository.save(history) } catch { accountMessage = "观看记录保存失败：\(error.localizedDescription)" }
     }
-    func clearHistory() { history = []; persistHistory() }
+    func clearHistory() { history = []; discovery.setHistory([]); persistHistory() }
     func closePlayer() { player.stop(); showPlayer = false }
-    func leavePlayer() { player.saveProgress(); showPlayer = false }
+    func leavePlayer() { player.saveProgress(); discovery.setHistory(history); showPlayer = false }
     func completeLogin(_ cookies: [String: String]) async throws {
         accountGeneration = UUID(); let identity = accountGeneration
         try await Task.detached { try CredentialVault.save(cookies) }.value
@@ -190,7 +174,7 @@ enum Destination: String, CaseIterable, Identifiable {
         await client.setCookies(cookies)
         guard identity == accountGeneration else { throw CancellationError() }
         library.setAccount(nil); comments.reset(); interactions.setAccount(nil); commentActions.setAccount(nil); profiles.setAccount(nil)
-        showLogin = false; snapshots = [:]; reload()
+        showLogin = false; discovery.reset(); searches.resetAccount(); searchAssistance.dismiss(); reload()
         do {
             let value = try await client.account()
             if identity == accountGeneration { account = value; library.setAccount(value?.id); interactions.setAccount(value?.id); commentActions.setAccount(value?.id); profiles.setAccount(value?.id); accountMessage = nil }
@@ -205,7 +189,7 @@ enum Destination: String, CaseIterable, Identifiable {
     func logout() async {
         do { try await Task.detached { try CredentialVault.clear() }.value }
         catch { accountMessage = "无法移除本机登录，请重试。"; return }
-        accountGeneration = UUID(); await client.setCookies([:]); account = nil; snapshots = [:]; accountMessage = nil; reload()
+        accountGeneration = UUID(); await client.setCookies([:]); account = nil; discovery.reset(); searches.resetAccount(); accountMessage = nil; reload()
     }
 }
 

@@ -11,7 +11,7 @@ private final class RedirectPolicy: NSObject, URLSessionTaskDelegate {
 
 public actor BilibiliClient {
     public static let mediaHeaders = ["User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36", "Referer": "https://www.bilibili.com/"]
-    private let session: URLSession
+    let session: URLSession
     private var cookies: [String: String] = [:]
     private var key: String?
     private var generation = UUID()

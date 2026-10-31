@@ -6,6 +6,24 @@ import BiliMacMedia
 
 @Suite struct LiveTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["BILIMAC_LIVE_TEST"] == "1"))
+    func publicSearchSuggestionsAndRegionalRanking() async throws {
+        let client = BilibiliClient()
+        let suggestions = try await client.suggestions("swift")
+        #expect(!suggestions.isEmpty)
+        for region in [ContentRegion.technology,.music] {
+            let ranking = try await client.discovery(source:.regions,region:region,page:1)
+            #expect(!ranking.items.isEmpty); #expect(!ranking.hasMore)
+        }
+        print("LIVE: official suggestions and two regional rankings checked without credentials or writes")
+    }
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["BILIMAC_LIVE_SEARCH"] == "1"))
+    func publicAdvancedSearch() async throws {
+        let client = BilibiliClient(); var options = VideoSearchOptions(); options.order = .views; options.duration = .short
+        let result = try await client.searchVideos("猫咪",page:1,options:options)
+        #expect(!result.items.isEmpty); #expect(result.total != nil)
+        print("LIVE: signed advanced video search checked without credentials or writes")
+    }
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["BILIMAC_LIVE_TEST"] == "1"))
     func publicUserProfileAndAvatar() async throws {
         let client = BilibiliClient()
         let profile = try await client.userProfile(mid: 946974)
@@ -72,10 +90,15 @@ import BiliMacMedia
     @Test(.enabled(if: ProcessInfo.processInfo.environment["BILIMAC_LIVE_PLAYBACK"] == "1")) @MainActor
     func publicVideoActuallyPlays() async throws {
         let client = BilibiliClient()
-        let feed = try await client.feed(recommended:false,page:1)
-        let video = try #require(feed.first)
-        let detail = try await client.detail(video.bvid)
-        let manifest = try await client.manifest(bvid:video.bvid,cid:detail.pages[0].id)
+        let bvid: String
+        if let sample = ProcessInfo.processInfo.environment["BILIMAC_LIVE_BVID"] {
+            bvid = try #require(VideoInput.bvid(sample))
+        } else {
+            let feed = try await client.feed(recommended:false,page:1)
+            bvid = try #require(feed.first).bvid
+        }
+        let detail = try await client.detail(bvid)
+        let manifest = try await client.manifest(bvid:bvid,cid:detail.pages[0].id)
         let representation = try #require(manifest.videos.filter { $0.codec.hasPrefix("avc1") }.last)
         let asset = try await NativePlaybackBridge().prepare(video:representation,audio:manifest.audio,headers:BilibiliClient.mediaHeaders)
         defer { asset.stop() }

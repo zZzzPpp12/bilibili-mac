@@ -11,7 +11,7 @@ struct RootView: View {
         HStack(spacing: 0) {
             sidebar.frame(width: 214)
             VStack(spacing: 0) {
-                toolbar
+                toolbar.zIndex(10)
                 Divider().opacity(0.5)
                 ZStack(alignment: .bottomTrailing) {
                     Group { if store.showPlayer { PlayerPage(store: store) } else { library } }
@@ -62,11 +62,28 @@ struct RootView: View {
             else if !store.profilePath.isEmpty { Button { store.backFromProfile() } label: { Image(systemName: "chevron.left") }.buttonStyle(.plain).accessibilityLabel("返回上一页") }
             HStack(spacing: 9) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("搜索视频或用户，或粘贴 BV / 用户主页链接", text: $store.query).textFieldStyle(.plain).focused($searching).onSubmit { store.search() }
+                TextField("搜索视频或用户，或粘贴 BV / 用户主页链接", text: $store.query).textFieldStyle(.plain).focused($searching).onSubmit { submitSearch() }
+                    .onKeyPress(.downArrow) { guard store.searchAssistance.presented else { return .ignored }; store.searchAssistance.move(1); return .handled }
+                    .onKeyPress(.upArrow) { guard store.searchAssistance.presented else { return .ignored }; store.searchAssistance.move(-1); return .handled }
+                    .onKeyPress(.escape) { store.searchAssistance.dismiss(); return .handled }
                     .help("关键词搜索后可切换视频/用户；支持 UID:123 和 space.bilibili.com 用户主页链接")
                 if !store.query.isEmpty { Button { store.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.tertiary) }.buttonStyle(.plain).accessibilityLabel("清空搜索") }
                 Text("⌘ F").font(.system(size: 10, design: .monospaced)).foregroundStyle(.tertiary)
             }.padding(.horizontal, 13).frame(height: 38).background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 11)).frame(maxWidth: 540)
+                .overlay(alignment: .topLeading) {
+                    if searching && store.searchAssistance.presented {
+                        SearchSuggestionsView(model: store.searchAssistance) { text in submitSearch(text) }.offset(y: 46)
+                    }
+                }
+                .onChange(of: store.query) { _, value in
+                    if searching && value != store.searches.term { store.searchAssistance.update(value) }
+                }
+                .onChange(of: searching) { _, focused in
+                    if focused { store.searchAssistance.update(store.query) } else { store.searchAssistance.dismiss() }
+                }
+                .onChange(of: store.account?.id) { _, _ in
+                    if searching { store.searchAssistance.update(store.query) }
+                }
             Spacer(minLength: 10)
             if let account = store.account {
                 Menu { Button("我的主页") { store.openProfile(account.id) }; Button("检查登录状态") { Task { await store.checkAccount() } }; Button("退出登录", role: .destructive) { Task { await store.logout() } } } label: { Label(account.name, systemImage: "person.crop.circle.fill") }.menuStyle(.borderlessButton).fixedSize()
@@ -85,48 +102,26 @@ struct RootView: View {
             SavedLibraryView(store: store)
         } else { discovery }
     }
-    private var discovery: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 25) {
-                HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(store.title).font(.system(size: 31, weight: .bold))
-                        Text(store.subtitle).font(.system(size: 13)).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if store.destination == .history && store.activeSearch.isEmpty {
-                        Button { clearHistory = true } label: { Label("清空", systemImage: "trash") }.disabled(store.history.isEmpty).buttonStyle(.glass)
-                    } else {
-                        Button { store.reload() } label: { Label("换一批", systemImage: "arrow.clockwise") }.buttonStyle(.glass).disabled(store.loading)
-                    }
-                }
-                if let message = store.accountMessage { Label(message, systemImage: "person.crop.circle.badge.exclamationmark").font(.callout).foregroundStyle(.secondary) }
-                if let error = store.error {
-                    HStack { Label(error, systemImage: "wifi.exclamationmark"); Spacer(); Button("重试") { store.reload() } }.font(.callout).padding(16).background(accent.opacity(0.08), in: .rect(cornerRadius: 14))
-                }
-                if store.destination == .history && store.activeSearch.isEmpty { historyGrid }
-                else { videoGrid }
-            }.padding(30)
-        }.background(alignment: .topTrailing) {
-            Circle().fill(accent.opacity(0.035)).frame(width: 480, height: 480).blur(radius: 100).offset(x:160,y:-200).allowsHitTesting(false)
-        }
+    private func submitSearch(_ text: String? = nil) {
+        if let text = text ?? store.searchAssistance.selectedText { store.query = text }
+        guard store.query.utf16.count <= 100 else { store.searchAssistance.update(store.query); return }
+        store.search(); searching = false
     }
-    @ViewBuilder private var videoGrid: some View {
-        if store.videos.isEmpty && !store.loading && store.error == nil {
-            ContentUnavailableView(store.activeSearch.isEmpty ? "还没有内容" : "没有找到相关视频", systemImage: "play.rectangle.on.rectangle", description: Text("试试其他关键词，或稍后刷新。")).frame(maxWidth: .infinity, minHeight: 350)
-        }
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 245), spacing: 22)], alignment: .leading, spacing: 28) {
-            ForEach(Array(store.videos.enumerated()), id: \.element.id) { index, video in
-                VideoCard(video: video, index: index, authorAction: video.authorID.map { mid in { store.openProfile(mid) } }) { store.open(video.bvid) }
+    @ViewBuilder private var discovery: some View {
+        if store.destination == .history {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    HStack {
+                        Text("观看记录").font(.system(size: 31, weight: .bold)); Spacer()
+                        Button { clearHistory = true } label: { Label("清空", systemImage: "trash") }.disabled(store.history.isEmpty).buttonStyle(.glass)
+                    }
+                    historyGrid
+                }.padding(30)
             }
+        } else {
+            DiscoveryPage(model: store.discovery, title: store.title, subtitle: store.subtitle, accountMessage: store.accountMessage,
+                          openVideo: store.open, openUser: store.openProfile)
         }
-        HStack {
-            Spacer()
-            if store.loading { ProgressView().controlSize(.small); Text("正在发现好内容…").font(.caption).foregroundStyle(.secondary) }
-            else if store.hasMore && !store.videos.isEmpty { Button("加载更多") { store.loadMore() }.buttonStyle(.glass) }
-            else if !store.videos.isEmpty { Text("慢慢看，好内容不赶时间").font(.caption).foregroundStyle(.tertiary) }
-            Spacer()
-        }.padding(.vertical, 16)
     }
     @ViewBuilder private var historyGrid: some View {
         if store.history.isEmpty {
